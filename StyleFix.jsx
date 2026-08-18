@@ -2,7 +2,7 @@
 #targetengine "StyleFix"
 
 /*
-StyleFix v1.0
+StyleFix v1.0.1
 Read-only audit for Word/import-created character-style debris, initially focused on
 character styles whose names begin with "Unnamed Style".
 
@@ -18,7 +18,7 @@ ExtendScript / ECMAScript 3 compatible.
 */
 
 (function () {
-    var VERSION = "1.0";
+    var VERSION = "1.0.1";
     var UNNAMED_RE = /^Unnamed Style(?:\s|$)/i;
     var rows = [];
     var counts = null;
@@ -195,6 +195,7 @@ ExtendScript / ECMAScript 3 compatible.
             characters: 0,
             pages: {},
             pageNames: [],
+            samples: [],
             firstUsage: null,
             firstPageRef: null,
             firstPageSort: 999999998,
@@ -418,84 +419,86 @@ ExtendScript / ECMAScript 3 compatible.
     }
 
     function equivalentCanonicalStyles(target, canonical) {
-        var matches = [];
-        var targetFP = formattingFingerprint(target);
+        var out = [];
+        var targetFingerprint = formattingFingerprint(target);
         var i, style;
-        if (targetFP === "") { return matches; }
+
+        if (targetFingerprint === "") { return out; }
+
         for (i = 0; i < canonical.length; i++) {
             style = canonical[i];
-            if (!valid(style) || sameStyle(style, target)) { continue; }
-            if (formattingFingerprint(style) === targetFP) {
-                matches.push(style);
+            if (!valid(style)) { continue; }
+            if (formattingFingerprint(style) === targetFingerprint) {
+                out.push(style);
             }
         }
-        return matches;
+        return out;
     }
 
     function formattingFingerprint(style) {
+        var parts = [];
         var props = [
             "appliedFont", "fontStyle", "pointSize", "leading", "tracking",
-            "capitalization", "position", "underline", "strikeThru", "noBreak",
-            "horizontalScale", "verticalScale", "baselineShift", "skew", "ligatures",
+            "kerningMethod", "position", "horizontalScale", "verticalScale",
+            "baselineShift", "skew", "capitalization", "underline", "strikeThru",
             "fillColor", "fillTint", "strokeColor", "strokeTint", "strokeWeight",
-            "overprintFill", "overprintStroke"
+            "ligatures", "noBreak", "language", "otfFigureStyle"
         ];
-        var parts = [];
-        var i;
-        if (!valid(style)) { return ""; }
+        var i, value;
+
         for (i = 0; i < props.length; i++) {
-            parts.push(props[i] + "=" + normalizedProperty(style, props[i]));
+            value = fingerprintValue(safePropertyObject(style, props[i]));
+            parts.push(props[i] + "=" + value);
         }
-        return parts.join(";");
+        return parts.join("|");
     }
 
-    function normalizedProperty(obj, prop) {
-        var value;
-        try { value = obj[prop]; } catch (e) { return "<unavailable>"; }
+    function fingerprintValue(value) {
         if (value === null || value === undefined) { return "<null>"; }
-
-        if (prop === "appliedFont") {
-            try { if (value.fullName !== undefined) { return String(value.fullName); } } catch (eFont) {}
-            try { if (value.name !== undefined) { return String(value.name); } } catch (eFontName) {}
-        }
-        if (prop === "fillColor" || prop === "strokeColor") {
-            return styleRefName(value);
-        }
         try {
-            if (value.constructor === Array) { return value.join("/"); }
-        } catch (eArray) {}
-        try { return String(value); } catch (eString) { return "<unprintable>"; }
+            if (value.name !== undefined) { return "name:" + String(value.name); }
+        } catch (eName) {}
+        try {
+            if (value.id !== undefined) { return "id:" + String(value.id); }
+        } catch (eId) {}
+        try { return String(value); } catch (eString) { return "<?>"; }
     }
 
     function classifyRisk(usage, deps, matches, usageScanErrors) {
-        if (usage.runs > 0 || deps.count > 0) {
-            if (deps.errors > 0 || usageScanErrors > 0) { return "HIGH"; }
-            if (matches.length === 1) { return "REPLACE"; }
+        var uncertain = usageScanErrors > 0 || deps.errors > 0;
+        var usedOrReferenced = usage.runs > 0 || deps.count > 0;
+
+        if (usedOrReferenced && matches.length === 1 && !uncertain) {
+            return "REPLACE";
+        }
+        if (usedOrReferenced) {
             return "HIGH";
         }
-        if (deps.errors > 0 || usageScanErrors > 0) { return "MEDIUM"; }
+        if (uncertain) {
+            return "MEDIUM";
+        }
         return "LOW";
     }
 
     function suggestedAction(risk, matches, deps) {
-        if (risk === "LOW") {
-            return "Safe deletion candidate after selected re-check";
+        if (risk === "LOW") { return "Safe deletion candidate"; }
+        if (risk === "REPLACE") { return "Review replacement with " + styleName(matches[0]); }
+        if (risk === "MEDIUM") { return "Review audit warning before deletion"; }
+        if (deps.count > 0) { return "Resolve usage/dependencies before deletion"; }
+        return "Review direct uses before deletion";
+    }
+
+    function importedState(style) {
+        try {
+            return style.imported === true ? "Yes" : "No";
+        } catch (e) {
+            return "Unknown";
         }
-        if (risk === "MEDIUM") {
-            return "Review; dependency scan was incomplete";
-        }
-        if (risk === "REPLACE") {
-            return "Replace with " + styleName(matches[0]) + ", verify references, then delete";
-        }
-        if (deps.count > 0) {
-            return "Resolve text usage/dependencies before deletion";
-        }
-        return "Review applied text before deletion";
     }
 
     function isCanonicalCandidate(style) {
         var name = styleName(style);
-        if (name === "" || name === "[None]") { return false; }
+        if (name === "[None]" || name === "None" || name === "") { return false; }
         if (UNNAMED_RE.test(name)) { return false; }
         return true;
     }
@@ -515,14 +518,14 @@ ExtendScript / ECMAScript 3 compatible.
         } catch (eFont) {}
 
         ui.summary = ui.win.add("statictext", undefined, "", {multiline: true});
-        ui.summary.preferredSize = [1160, 86];
+        ui.summary.preferredSize = [1120, 92];
 
         ui.list = ui.win.add("listbox", undefined, [], {multiselect: false});
-        ui.list.preferredSize = [1160, 440];
+        ui.list.preferredSize = [1120, 440];
         ui.list.onDoubleClick = locateFirstUse;
 
         ui.status = ui.win.add("statictext", undefined, "");
-        ui.status.preferredSize = [1160, 34];
+        ui.status.preferredSize = [1120, 34];
 
         buttons = ui.win.add("group");
         buttons.alignment = ["right", "top"];
@@ -547,62 +550,66 @@ ExtendScript / ECMAScript 3 compatible.
         for (i = 0; i < rows.length; i++) {
             row = rows[i];
             line = fixed(row.risk, 8) + "  " +
-                   fixed(row.styleName, 27) + "  " +
-                   "Use " + fixed(row.directRuns, 5) + "  " +
-                   "Chars " + fixed(row.characters, 7) + "  " +
-                   "Deps " + fixed(row.dependencyCount, 4) + "  " +
-                   "Imported " + fixed(row.imported, 4) + "  " +
-                   "Match " + fixed(row.canonicalMatch || "-", 28) + "  " +
-                   fixed(row.pages || "-", 30);
+                   fixed(row.styleName, 26) + "  " +
+                   "Uses " + fixed(row.directRuns, 6) + "  " +
+                   "Chars " + fixed(row.characters, 8) + "  " +
+                   "Deps " + fixed(row.dependencyCount, 5) + "  " +
+                   "Match " + fixed(row.canonicalMatch || "-", 24) + "  " +
+                   fixed(row.pages || "-", 22) + "  " +
+                   row.samples;
             ui.list.add("item", line);
         }
 
         ui.summary.text = docName(doc) + "\n" +
             "Character styles: " + counts.characterStyles +
             "    Unnamed candidates: " + counts.unnamedStyles +
-            "    Imported: " + counts.imported +
             "    Directly used: " + counts.directlyUsed +
-            "    Referenced: " + counts.referenced + "\n" +
-            "LOW: " + counts.low +
-            "    MEDIUM: " + counts.medium +
-            "    HIGH: " + counts.high +
-            "    REPLACE: " + counts.replace +
+            "    Referenced: " + counts.referenced +
+            "    Imported: " + counts.imported + "\n" +
+            "Risk: HIGH=" + counts.high +
+            "  REPLACE=" + counts.replace +
+            "  MEDIUM=" + counts.medium +
+            "  LOW=" + counts.low +
             "    Audit warnings: " + counts.scanWarnings;
 
         try { ui.win.layout.layout(true); } catch (eLayout) {}
     }
 
     function locateFirstUse() {
-        var row, text, located = false;
+        var row, target, located = false;
+
         if (ui.list.selection === null) {
             alert("Select a StyleFix row first.");
             return;
         }
 
         row = rows[ui.list.selection.index];
-        if (!row || row.firstUsage === null || !valid(row.firstUsage)) {
-            alert("This style has no direct text usage to locate.\n\n" +
-                  "Risk: " + (row ? row.risk : "?") +
-                  (row && row.dependencies ? "\nDependencies: " + row.dependencies : ""));
+        if (!row) { return; }
+
+        if (row.firstUsage === null || !valid(row.firstUsage)) {
+            alert(row.styleName + " has no direct text use to locate.\n\n" +
+                  "Risk: " + row.risk + "\n" +
+                  "Dependencies: " + row.dependencyCount +
+                  (row.dependencies.length > 0 ? "\n\n" + row.dependencies : ""));
             return;
         }
 
-        text = row.firstUsage;
+        target = row.firstUsage;
         try {
             if (row.firstPageRef !== null && valid(row.firstPageRef)) {
                 app.activeWindow.activePage = row.firstPageRef;
             }
         } catch (ePage) {}
 
-        try { text.showText(); located = true; } catch (eShow) {}
-        try { app.select(text); located = true; } catch (eSelect) {
-            try { app.select(text.insertionPoints.item(0)); located = true; } catch (eIP) {}
+        try { target.showText(); located = true; } catch (eShow) {}
+        try { app.select(target); located = true; } catch (eSelect) {
+            try { app.select(target.insertionPoints.item(0)); located = true; } catch (eIP) {}
         }
 
         if (located) {
             status("Located first direct use of " + row.styleName + ".");
         } else {
-            alert("InDesign could not navigate to the first recorded use of " + row.styleName + ".");
+            alert("InDesign could not navigate to the first use of " + row.styleName + ".");
         }
     }
 
@@ -627,8 +634,8 @@ ExtendScript / ECMAScript 3 compatible.
             "Risk", "Style Name", "Style ID", "Imported", "Based On",
             "Direct Runs", "Characters", "Pages", "Sample Text",
             "Dependency Count", "Dependencies", "Audit Warnings",
-            "Canonical Match", "Canonical Match Count", "Suggested Action",
-            "Formatting Fingerprint"
+            "Canonical Match", "Canonical Match Count", "Formatting Fingerprint",
+            "Suggested Action"
         ]));
 
         for (i = 0; i < rows.length; i++) {
@@ -637,7 +644,7 @@ ExtendScript / ECMAScript 3 compatible.
                 row.risk, row.styleName, row.styleId, row.imported, row.basedOn,
                 row.directRuns, row.characters, row.pages, row.samples,
                 row.dependencyCount, row.dependencies, row.dependencyErrors,
-                row.canonicalMatch, row.matchCount, row.action, row.fingerprint
+                row.canonicalMatch, row.matchCount, row.fingerprint, row.action
             ]));
         }
 
@@ -647,78 +654,67 @@ ExtendScript / ECMAScript 3 compatible.
     }
 
     function sortRows() {
-        var rank = {"HIGH": 0, "REPLACE": 1, "MEDIUM": 2, "LOW": 3};
         rows.sort(function (a, b) {
-            var ra = rank[a.risk] !== undefined ? rank[a.risk] : 9;
-            var rb = rank[b.risk] !== undefined ? rank[b.risk] : 9;
+            var ra = riskRank(a.risk);
+            var rb = riskRank(b.risk);
             if (ra !== rb) { return ra - rb; }
-            return naturalStyleCompare(a.styleName, b.styleName);
+            if (a.firstPageSort !== b.firstPageSort) { return a.firstPageSort - b.firstPageSort; }
+            return numericSuffix(a.styleName) - numericSuffix(b.styleName);
         });
     }
 
-    function naturalStyleCompare(a, b) {
-        var ma = String(a).match(/^(.*?)(\d+)$/);
-        var mb = String(b).match(/^(.*?)(\d+)$/);
-        if (ma && mb && ma[1] === mb[1]) {
-            return Number(ma[2]) - Number(mb[2]);
-        }
-        a = String(a).toLowerCase();
-        b = String(b).toLowerCase();
-        if (a < b) { return -1; }
-        if (a > b) { return 1; }
-        return 0;
+    function riskRank(risk) {
+        if (risk === "HIGH") { return 0; }
+        if (risk === "REPLACE") { return 1; }
+        if (risk === "MEDIUM") { return 2; }
+        return 3;
+    }
+
+    function numericSuffix(name) {
+        var m = String(name).match(/(\d+)\s*$/);
+        return m ? Number(m[1]) : 999999999;
     }
 
     function safeAllCharacterStyles(doc) {
-        var result = [];
+        var out = [];
         var all, i;
         try {
             all = doc.allCharacterStyles;
-            for (i = 0; i < all.length; i++) { result.push(all[i]); }
+            for (i = 0; i < all.length; i++) {
+                if (valid(all[i])) { out.push(all[i]); }
+            }
         } catch (e) {}
-        return result;
+        return out;
     }
 
-    function importedState(style) {
-        try {
-            if (style.imported === true) { return "Yes"; }
-            if (style.imported === false) { return "No"; }
-        } catch (e) {}
-        return "?";
+    function styleKey(style) {
+        try { return "id:" + String(style.id); } catch (eId) {}
+        return "name:" + styleName(style);
     }
 
     function sameStyle(a, b) {
         if (a === null || b === null || a === undefined || b === undefined) { return false; }
-        try { return Number(a.id) === Number(b.id); } catch (eId) {}
-        try { return String(a.toSpecifier()) === String(b.toSpecifier()); } catch (eSpec) {}
-        return false;
+        try { return String(a.id) === String(b.id); } catch (eId) {}
+        return styleName(a) === styleName(b);
     }
 
     function styleRefMatches(ref, target) {
-        if (ref === null || ref === undefined || target === null || target === undefined) { return false; }
-        if (sameStyle(ref, target)) { return true; }
-        try { return String(ref) === styleName(target); } catch (e) { return false; }
+        if (ref === null || ref === undefined) { return false; }
+        return sameStyle(ref, target) || styleRefName(ref) === styleName(target);
     }
 
-    function styleKey(style) {
-        try { return "ID:" + String(style.id); } catch (eId) {}
-        return "NAME:" + styleName(style);
+    function styleRefName(style) {
+        if (style === null || style === undefined) { return ""; }
+        try { return String(style.name); } catch (eName) {}
+        try { return String(style); } catch (eString) { return ""; }
     }
 
     function styleName(style) {
         try { return String(style.name); } catch (e) { return "<unknown>"; }
     }
 
-    function styleRefName(ref) {
-        if (ref === null || ref === undefined) { return ""; }
-        try { if (ref.name !== undefined) { return String(ref.name); } } catch (eName) {}
-        try { return String(ref); } catch (eString) { return ""; }
-    }
-
-    function joinStyleNames(styles) {
-        var names = [], i;
-        for (i = 0; i < styles.length; i++) { names.push(styleName(styles[i])); }
-        return names.join(" | ");
+    function safeCollectionLength(obj, prop) {
+        try { return obj[prop].length; } catch (e) { return 0; }
     }
 
     function previewText(value) {
@@ -726,8 +722,12 @@ ExtendScript / ECMAScript 3 compatible.
         s = s.replace(/[\r\n\t]+/g, " ");
         s = s.replace(/  +/g, " ");
         s = s.replace(/^ +/, "").replace(/ +$/, "");
-        if (s.length > 110) { s = s.substring(0, 107) + "..."; }
+        if (s.length > 120) { s = s.substring(0, 117) + "..."; }
         return s;
+    }
+
+    function safeContents(obj) {
+        try { return obj.contents; } catch (e) { return ""; }
     }
 
     function containsString(arr, value) {
@@ -738,31 +738,29 @@ ExtendScript / ECMAScript 3 compatible.
         return false;
     }
 
-    function safeCollectionLength(obj, prop) {
-        try { return Number(obj[prop].length); } catch (e) { return 0; }
-    }
-
-    function safeContents(obj) {
-        try { return obj.contents; } catch (e) { return ""; }
-    }
-
-    function safeProperty(obj, name, fallback) {
-        try { return String(obj[name]); } catch (e) { return fallback; }
-    }
-
-    function safePropertyObject(obj, name) {
-        try { return obj[name]; } catch (e) { return null; }
+    function joinStyleNames(styles) {
+        var names = [], i;
+        for (i = 0; i < styles.length; i++) { names.push(styleName(styles[i])); }
+        return names.join(" | ");
     }
 
     function valid(obj) {
-        try { return obj !== null && obj !== undefined && obj.isValid === true; } catch (e) { return false; }
+        try { return obj !== null && obj.isValid === true; } catch (e) { return false; }
     }
 
-    function fixed(value, width) {
-        var s = String(value);
-        while (s.length < width) { s += " "; }
-        if (s.length > width) { s = s.substring(0, width - 3) + "..."; }
-        return s;
+    function safeProperty(obj, name, fallback) {
+        try {
+            var value = obj[name];
+            if (value === undefined || value === null) { return fallback; }
+            return String(value);
+        } catch (e) { return fallback; }
+    }
+
+    function safePropertyObject(obj, name) {
+        try {
+            var value = obj[name];
+            return value === undefined ? null : value;
+        } catch (e) { return null; }
     }
 
     function csv(values) {
@@ -772,6 +770,13 @@ ExtendScript / ECMAScript 3 compatible.
             out.push("\"" + s + "\"");
         }
         return out.join(",");
+    }
+
+    function fixed(value, width) {
+        var s = String(value);
+        while (s.length < width) { s += " "; }
+        if (s.length > width) { s = s.substring(0, width - 3) + "..."; }
+        return s;
     }
 
     function defaultFile(doc, name) {
