@@ -2,22 +2,30 @@
 
 StyleFix is an Adobe InDesign ExtendScript utility for auditing imported and automatically generated style debris before any styles are deleted or consolidated.
 
-## v1.0.4
+## v1.0.5
 
-StyleFix v1.0.4 remains read-only. It audits character styles in the two imported-style families observed in production:
+StyleFix v1.0.5 remains read-only. It audits character styles in the two imported-style families observed in production:
 
 - `Unnamed Style *`
 - `Word Imported List Style*`
 
 It also performs a paragraph-style census for those same name families so a zero character-style count cannot hide a similarly named paragraph-style population.
 
-No style, text, or document structure is changed in v1.0.4.
+No style, text, or document structure is changed in v1.0.5.
 
-### Changes in v1.0.4
+### v1.0.5 canary hotfix
 
-v1.0.4 adds the safeguards identified during peer review:
+The first v1.0.4 canary run failed with InDesign Error 55 because the recursive walker attempted to obtain `endnotes` from generic descended text containers. Generic Text objects do not expose that collection in the tested ExtendScript DOM.
 
-- recursive direct-use scanning across ordinary stories, table cells, nested tables, footnotes, endnotes, and overset/no-page text;
+v1.0.5 removes document-level and generic-container `endnotes` probing. Endnote content is discovered by scanning document stories and classifying a story whose `isEndnoteStory` property is true as ENDNOTE context. This keeps direct-use scanning inside the Story API surface and allows endnote text-style ranges to flow through the same usage scanner as ordinary stories.
+
+The failed v1.0.4 run is recorded in `CANARY_FAILURE_v1.0.4.md` and is not release evidence.
+
+### Safeguards carried forward
+
+v1.0.5 includes:
+
+- recursive direct-use scanning across ordinary stories, table cells, nested tables, footnotes, endnote stories, and overset/no-page text;
 - a one-pass dependency index;
 - style identity by ID, specifier, then fully qualified path;
 - fingerprint property validation using `appliedLanguage`;
@@ -41,7 +49,7 @@ v1.0.4 adds the safeguards identified during peer review:
 | `LOW` | No direct text use, no dependency or export mapping, supported scans completed, and book scope permits document-only safety. |
 | `MEDIUM` | No confirmed use or dependency, but deletion-safety evidence is incomplete or book scope blocks LOW. |
 | `HIGH` | Direct use without one clean canonical match, or a dependency/export mapping that must be resolved. |
-| `REPLACE` | Direct use, no known dependency/export mapping, and exactly one non-imported substantive canonical character style has the same validated fingerprint. Diagnostic only in v1.0.4. |
+| `REPLACE` | Direct use, no known dependency/export mapping, and exactly one non-imported substantive canonical character style has the same validated fingerprint. Diagnostic only in v1.0.5. |
 
 A future delete-after-replace action must satisfy the same evidence completeness required for LOW and must finish with a zero-reference rescan. `REPLACE` alone never authorizes deletion.
 
@@ -107,4 +115,6 @@ The planned release will use the established multi-select pattern:
 
 The scripts are written for Adobe InDesign ExtendScript / ECMAScript 3 compatibility.
 
-`StyleFix.jsx` is the v1.0.4 loader and the `src/StyleFix.part*.jsxinc` files contain the audited implementation. Keep the `src` folder beside `StyleFix.jsx` when running the repository version. The loader assembles the source in order and reports a missing-component error rather than running a partial artifact.
+`StyleFix.jsx` is the v1.0.5 loader and the `src/StyleFix.part*.jsxinc` files contain the audited implementation. Keep the `src` folder beside `StyleFix.jsx` when running the repository version. The loader assembles the source in order and reports a missing-component error rather than running a partial artifact.
+
+A self-contained deployable `StyleFix.jsx` is planned after the canary passes, so packaging changes do not obscure scanner correctness during this test cycle.
