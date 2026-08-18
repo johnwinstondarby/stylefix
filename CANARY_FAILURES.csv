@@ -3,3 +3,6 @@ Date,Version,Context,Error,Line,Diagnosis,Fixed In,Caught By,Failure Mode
 2026-08-18,1.0.1,Canonical equivalence,No runtime error,,Empty imported shells matched many other imported Word styles and produced false canonical-match signals,1.0.2,Production audit review,SILENT
 2026-08-18,1.0.3,Table-cell direct usage,No runtime error,,Story-only traversal could classify a style used only in a table cell as unused,1.0.4,Peer review,SILENT
 2026-08-18,1.0.4,Endnote traversal,Error 55: object does not support property or method endnotes,1424,Generic traversal probed endnotes on an object class that did not expose it,1.0.5,Canary,LOUD
+2026-08-18,1.0.6,Canary builder direct-style application,Error 24: applyCharacterStyle is not a function,608,Builder passed Story containers to a method exposed by Text objects; eleven controls failed at the shared helper,1.0.7,Canary builder,LOUD
+2026-08-18,1.0.6,Canary C05 endnote construction,No runtime error,,Endnote construction completed but direct-object read-back found literal=NO and only three characters; intended endnote text was never established,1.0.7,Canary builder read-back,SILENT
+2026-08-18,1.0.6,Canary C06 overset verification,No runtime error,,Builder styled a character range but verifier expected a text object with a characters collection and returned undefined style evidence,1.0.7,Canary builder read-back,SILENT
