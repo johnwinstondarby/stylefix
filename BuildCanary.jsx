@@ -1,7 +1,7 @@
 #target "InDesign"
 
  /*
- StyleFix Canary Fixture Builder v1.0.4
+ StyleFix Canary Fixture Builder v1.0.5
 
  Creates a NEW scratch document containing the positive, dependency-only,
  formatting/export, cross-class, and book-scope controls defined in
@@ -16,7 +16,7 @@
  */
 
 (function () {
-    var VERSION = "1.0.4";
+    var VERSION = "1.0.5";
     var log = [];
     var failed = 0;
     var doc = null;
