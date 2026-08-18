@@ -1,29 +1,29 @@
-ID,Control Class,Direct Runs,Expected Risk,Additional Acceptance
-C01,Direct use,>=1,Not LOW,
-C02,Direct use,>=1,Not LOW,
-C03,Direct use,>=1,Not LOW,
-C04,Direct use,>=1,Not LOW,
-C05,Direct use,>=1,Not LOW,
-C06,Direct use,>=1,Not LOW,
-C07,Direct use,>=1,Not LOW,
-C08,Direct use,>=1,Not LOW,
-C09,Direct use,>=1,Not LOW,
-C10,Direct use,>=1,Not LOW,
-C11,Direct use,>=1,Not LOW,
-C12,Direct use,>=1,Not LOW,
-C13,Direct use,>=1,Not LOW,
-C14,Direct use,>=1,Not LOW,
-D01,Dependency only,0 direct expected,Dependency >=1; Not LOW,
-D02,Dependency only,0 direct expected,Dependency >=1; Not LOW,
-D03,Dependency only,0 direct expected,Dependency >=1; Not LOW,
-D04,Dependency only,0 direct expected,Dependency >=1; Not LOW,
-D05,Dependency only,0 direct expected,Dependency >=1; Not LOW,
-D06,Dependency only,0 direct expected,Dependency >=1; Not LOW,
-D07,Dependency only,0 direct expected,Dependency >=1; Not LOW,
-E01,Formatting/export,0,LOW,Formatting State = EMPTY SHELL; Export Map Count = 0
-E02,Formatting/export,0,Not LOW,Export Map Count >=1
-F01,Fingerprint,0,LOW,Canonical Match Count = 1
-F02,Fingerprint,>=1,REPLACE,Canonical Match Count = 1; correct target Canary Canonical F02
-F03,Fingerprint,>=1,HIGH,Canonical Match Count = 0
-F04,Fingerprint,>=1,HIGH,Canonical Match Count = 2
-P01,Paragraph census,N/A,N/A,Paragraph Unnamed Count >=1; absent from character candidates
+Fixture Version,ID,Control Class,Direct Runs,Dependency Count,Expected Risk,Additional Acceptance
+1.0.6,C01,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C02,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C03,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C04,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C05,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C06,Direct use,>=1,,Not LOW,Builder census YES; IDML found; overset evidence
+1.0.6,C07,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C08,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C09,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C10,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C11,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C12,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,C13,Direct use,>=1,,Not LOW,Builder census YES; IDML found; multi-page evidence
+1.0.6,C14,Direct use,>=1,,Not LOW,Builder census YES; IDML found
+1.0.6,D01,Dependency only,0,>=1,Not LOW,Builder census YES
+1.0.6,D02,Dependency only,0,>=1,Not LOW,Builder census YES
+1.0.6,D03,Dependency only,0,>=1,Not LOW,Builder census YES
+1.0.6,D04,Dependency only,0,>=1,Not LOW,Builder census YES
+1.0.6,D05,Dependency only,0,>=1,Not LOW,Builder census YES
+1.0.6,D06,Dependency only,0,>=1,Not LOW,Builder census YES
+1.0.6,D07,Dependency only,0,>=1,Not LOW,Builder census YES
+1.0.6,E01,Formatting/export,0,0,LOW,Formatting State = EMPTY SHELL; Export Map Count = 0
+1.0.6,E02,Formatting/export,0,>=1,Not LOW,Export Map Count >=1
+1.0.6,F01,Fingerprint,0,0,LOW,Canonical Match Count = 1
+1.0.6,F02,Fingerprint,>=1,0,REPLACE,Canonical Match Count = 1; Canary Canonical F02; IDML found
+1.0.6,F03,Fingerprint,>=1,0,HIGH,Canonical Match Count = 0; IDML found
+1.0.6,F04,Fingerprint,>=1,0,HIGH,Canonical Match Count = 2; IDML found
+1.0.6,P01,Paragraph census,N/A,N/A,N/A,Paragraph Unnamed Count >=1; absent from character candidates

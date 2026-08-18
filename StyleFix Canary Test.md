@@ -1,49 +1,72 @@
 # StyleFix Canary Test
 
-Acceptance test that must pass before any StyleFix release is permitted to
-delete or replace a style in a production document.
+Binding acceptance test for StyleFix scanner completeness. No StyleFix release may delete or replace styles in a production document until this test passes on the same InDesign build used for that production run.
 
-## Why a fixture and not the manuscript
+## Why a fixture
 
-A production scan cannot prove scanner completeness. If the scanner fails to
-look inside table cells, the manuscript reports zero uses for a style that is
-in use, and the report looks clean. A clean production result is therefore
-consistent with both a correct scanner and a broken one.
+A production scan cannot prove scanner completeness. A missing traversal path can report zero use and look clean. The canary uses a document whose correct answer is known before the scan.
 
-The canary inverts this. It is a document whose correct answer is known in
-advance, so the scan is graded against a fixed expectation rather than
-interpreted.
+v1.0.6 requires independent measurements so the test harness cannot share the scanner's blind spot.
 
-Two control classes are required:
+## Evidence layers
 
-- **Positive controls.** Styles placed in locations the scanner must reach.
-  Each must report usage or a dependency, and none may receive LOW.
-- **Negative controls.** Styles that genuinely are unused and unreferenced.
-  Each must receive LOW.
+A valid canary run has three independent evidence layers before the StyleFix result is graded.
 
-Without negative controls, a scanner that classifies nothing as LOW passes the
-test while being useless.
+### 1. Construction plus independent builder read-back
 
-## Fixture construction
+Run `BuildCanary.jsx`.
 
-Build the fixture with a script, `BuildCanary.jsx`, rather than by hand. A
-generated fixture is reproducible, reviewable in the repository as text, and
-survives InDesign version changes. Commit the generator and the expected
-result file. Rebuild and re-run after every version bump.
+The builder creates every control, retains the exact object returned by construction, then verifies that exact object directly. It does **not** call or import StyleFix traversal functions.
 
-Run the canary on the same InDesign build used for production. Dependency and
-usage coverage vary by DOM version, and a pass on one build does not carry to
-another.
+The builder emits:
 
-Name the canary styles inside the production candidate families so that the
-candidate pattern matching is also under test.
+- `StyleFix_Canary_v1_0_6.indd`
+- `StyleFix_Canary_v1_0_6.idml`
+- `StyleFix_Canary_Build_v1_0_6.txt`
+- `StyleFix_Canary_Census_v1_0_6.csv`
 
-## Placement matrix
+The fixture is invalid if the build log reports any failed construction/read-back step or if the builder census contains `Verified = NO`.
 
-Positive controls. Each style is applied to text in exactly one location.
-Expected result for all of them: direct runs at least 1, risk not LOW.
+### 2. IDML XML verification
 
-| ID  | Location |
+Run:
+
+```text
+python VerifyCanaryIDML.py StyleFix_Canary_v1_0_6.idml
+```
+
+The verifier shares no traversal code with either ExtendScript. It maps character-style IDs from `Resources/Styles.xml` and checks `Stories/*.xml` for the planted direct-use controls.
+
+All C01-C14 and F02-F04 must be present.
+
+### 3. StyleFix scan
+
+Run the same release of `StyleFix.jsx` against the generated INDD and save the CSV.
+
+The CSV must report:
+
+- Script Version = 1.0.6
+- Fixture Version = 1.0.6
+- Installed Artifact Parity = PASS
+- LOW Authorization Schema = 1
+- the traversal capability matrix
+- the complete LOW authorization chain
+
+A script/fixture version mismatch invalidates the run.
+
+## Capability and instance requirements
+
+The traversal matrix records capability and instance presence separately.
+
+Capabilities used for direct-use discovery are `SUPPORTED`, `NOT_EXPOSED`, or `FAILED`. A usage-critical path that is not supported blocks LOW unless a session-scoped operator assertion is recorded with operator, timestamp, and independent basis.
+
+The normal canary run should require no operator assertions. An assertion used during the canary must be reviewed as a test exception and does not count as a clean compatibility pass.
+
+## Direct-use controls
+
+Each style is applied in exactly one intended location unless noted. Expected result: Direct Runs >= 1 and risk is not LOW.
+
+| ID | Location |
 | --- | --- |
 | C01 | Ordinary story text |
 | C02 | Table cell |
@@ -52,23 +75,21 @@ Expected result for all of them: direct runs at least 1, risk not LOW.
 | C05 | Endnote text |
 | C06 | Overset text in an undersized frame |
 | C07 | Text frame on the pasteboard |
-| C08 | Text frame on a parent (master) page |
+| C08 | Text frame on a parent/master page |
 | C09 | Anchored inline text frame |
 | C10 | Text frame inside a group |
 | C11 | Text frame on a hidden layer |
 | C12 | Text frame on a locked layer |
 | C13 | Threaded story spanning three pages |
-| C14 | Table placed on a parent (master) page |
+| C14 | Table placed on a parent/master page |
 
-C06 additionally verifies that unresolved pages are reported rather than
-dropped. C13 additionally verifies page-range reporting.
+C06 also verifies unresolved-page/overset reporting. C13 verifies multi-page reporting.
 
 ## Dependency-only controls
 
-Zero text application. Expected result for all of them: dependency count at
-least 1, risk not LOW.
+Zero intentional direct application. Expected result: Dependency Count >= 1 and risk not LOW.
 
-| ID  | Reference path |
+| ID | Reference path |
 | --- | --- |
 | D01 | Bullet character style on a paragraph style |
 | D02 | Nested GREP style on a paragraph style |
@@ -80,70 +101,70 @@ least 1, risk not LOW.
 
 ## Formatting and export controls
 
-| ID  | Setup | Expected |
+| ID | Setup | Expected |
 | --- | --- | --- |
-| E01 | No attributes set, unused, unreferenced, no export mapping | LOW, formatting state EMPTY SHELL |
-| E02 | No attributes set, unused, unreferenced, custom export tag and class | Not LOW |
-| F01 | Substantive, unused, unreferenced, fingerprint identical to one canonical style | LOW, match recorded in the report |
-| F02 | Substantive, used once, fingerprint identical to exactly one canonical style | REPLACE, match count 1, correct target named |
-| F03 | Substantive, used once, fingerprint differing from canonical by tracking only | HIGH, match count 0 |
-| F04 | Substantive, used once, fingerprint identical to two canonical styles | HIGH, match count 2 |
+| E01 | No attributes, unused, unreferenced, no export mapping | LOW; Formatting State = EMPTY SHELL |
+| E02 | No attributes, unused, unreferenced, custom export tag/class | Not LOW; Export Map Count >= 1 |
+| F01 | Substantive, unused, fingerprint identical to one canonical style | LOW; match recorded |
+| F02 | Substantive, used once, identical to one canonical style | REPLACE; match count 1; target `Canary Canonical F02` |
+| F03 | Substantive, used once, differs from canonical by tracking | HIGH; match count 0 |
+| F04 | Substantive, used once, identical to two canonical styles | HIGH; match count 2 |
 
-E02 is the control for export-tag safety. F03 is the control against
-over-matching, which is the failure mode that causes a wrong replacement.
+## Cross-class census
 
-## Cross-class census control
-
-| ID  | Setup | Expected |
+| ID | Setup | Expected |
 | --- | --- | --- |
-| P01 | A **paragraph** style named inside a candidate family | Reported in the paragraph census; absent from the character-style candidate list |
+| P01 | Paragraph style named inside candidate family | Paragraph census >= 1; absent from character candidate list |
 
-This confirms that a zero count in one style class is reported as a class
-boundary rather than as evidence of absence.
+## Book scope
 
-## Book scope control
+Run the canary with no InDesign book open and no `.indb` in the fixture folder.
 
-Run the canary with no InDesign book open. If every candidate returns MEDIUM,
-the book gate is firing on a document that has no book membership, and the gate
-logic needs correction before the production run.
+If every otherwise-unused candidate becomes MEDIUM because of book scope, the gate is misfiring.
 
-Note the limit of the runtime check: the DOM can only see books that are
-currently open. A document may belong to a book that is closed, and no script
-can determine that. Book scope is therefore a documented precondition, not a
-verified fact.
+A script cannot prove membership in an unopened book elsewhere. Production book scope remains a documented operator precondition.
 
 ## Pass criteria
 
-The release is blocked unless all of the following hold on a single run.
+The release is blocked unless all of the following hold in one test cycle:
 
-1. C01 through C14 each report direct runs of at least 1, and none is LOW.
-2. D01 through D07 each report a dependency count of at least 1, and none is LOW.
-3. E02 is not LOW.
-4. The complete set of LOW results is exactly E01, F01, and any dedicated
-   unused negative controls. No other style is LOW.
-5. F02 is REPLACE with a match count of 1 naming the correct canonical style.
-6. F03 and F04 are HIGH.
-7. P01 appears in the paragraph census and not in the character-style
-   candidate list.
-8. The fingerprint schema probe reports zero dropped properties, or the
-   dropped properties are listed in the run record and reviewed.
+1. Builder log reports zero failed steps.
+2. Builder census contains 28 controls and every row is Verified = YES.
+3. IDML verifier finds C01-C14 and F02-F04.
+4. StyleFix installed parity is PASS.
+5. StyleFix Script Version and Fixture Version are both 1.0.6.
+6. No usage-critical traversal capability is `NOT_EXPOSED` or `FAILED`.
+7. C01-C14 each report Direct Runs >= 1 and none is LOW.
+8. D01-D07 each report Dependency Count >= 1 and none is LOW.
+9. E02 is not LOW.
+10. The LOW set is exactly E01, F01, and any separately documented unused negative controls.
+11. F02 is REPLACE with one match naming `Canary Canonical F02`.
+12. F03 and F04 are HIGH.
+13. P01 appears in the paragraph census and not in the character candidate list.
+14. Fingerprint schema probe reports zero dropped properties, or every dropped property is explicitly reviewed and the run is recorded as an exception.
+15. LOW Authorization Schema = 1 and every component required for LOW is YES for E01 and F01.
+16. The normal acceptance run uses no operator usage assertions.
 
-Any single failure blocks the production run. A partial pass is not a pass,
-because the failures indicate which locations the scanner cannot see, and the
-production document contains all of those locations.
+Any failure blocks remediation. A partial pass is not a pass.
 
-## Run record
+## Provenance record
 
-Every canary run and every production CSV carries a provenance header:
+Every canary StyleFix CSV records:
 
-- script version and release tag;
+- script/release version;
+- loader/base/patch versions;
+- installed-artifact parity and module checks;
 - run timestamp;
-- document name and document modification date;
-- InDesign version and build;
-- book scope determination and how it was established;
-- fingerprint schema probe result, including dropped properties;
-- candidate family patterns in effect;
+- document name/modification date;
+- InDesign version/build;
+- operating system;
+- fixture version/schema/ID;
+- book scope and determination method;
+- fingerprint schema;
+- traversal capability matrix and instance counts;
+- operator usage assertions;
+- LOW Authorization Schema and component results;
+- warning sets; and
 - counts by risk classification.
 
-A CSV without this header cannot be audited later and should not be entered
-into the record.
+A CSV without this provenance is not release evidence.

@@ -1,0 +1,5 @@
+Date,Version,Context,Error,Line,Diagnosis,Fixed In,Caught By,Failure Mode
+2026-08-18,1.0.0,Unused-style row construction,Error 21: undefined is not an object,97,emptyUsage omitted samples array before usage.samples.join(),1.0.1,First production audit,LOUD
+2026-08-18,1.0.1,Canonical equivalence,No runtime error,,Empty imported shells matched many other imported Word styles and produced false canonical-match signals,1.0.2,Production audit review,SILENT
+2026-08-18,1.0.3,Table-cell direct usage,No runtime error,,Story-only traversal could classify a style used only in a table cell as unused,1.0.4,Peer review,SILENT
+2026-08-18,1.0.4,Endnote traversal,Error 55: object does not support property or method endnotes,1424,Generic traversal probed endnotes on an object class that did not expose it,1.0.5,Canary,LOUD

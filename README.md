@@ -1,120 +1,112 @@
 # StyleFix
 
-StyleFix is an Adobe InDesign ExtendScript utility for auditing imported and automatically generated style debris before any styles are deleted or consolidated.
+StyleFix is an Adobe InDesign audit utility for examining imported and automatically generated character-style debris before any style is deleted or consolidated.
 
-## v1.0.5
+**Current release: v1.0.6, audit only.** StyleFix v1.0.6 does not delete styles or rewrite text. Its job is to answer a narrower question with defensible evidence: which candidate styles are unused, which are referenced, which carry export semantics, and whether the installed InDesign build exposes enough of the document model to authorize a LOW-risk result.
 
-StyleFix v1.0.5 remains read-only. It audits character styles in the two imported-style families observed in production:
+## What StyleFix audits
+
+The current candidate families are:
 
 - `Unnamed Style *`
 - `Word Imported List Style*`
 
-It also performs a paragraph-style census for those same name families so a zero character-style count cannot hide a similarly named paragraph-style population.
-
-No style, text, or document structure is changed in v1.0.5.
-
-### v1.0.5 canary hotfix
-
-The first v1.0.4 canary run failed with InDesign Error 55 because the recursive walker attempted to obtain `endnotes` from generic descended text containers. Generic Text objects do not expose that collection in the tested ExtendScript DOM.
-
-v1.0.5 removes document-level and generic-container `endnotes` probing. Endnote content is discovered by scanning document stories and classifying a story whose `isEndnoteStory` property is true as ENDNOTE context. This keeps direct-use scanning inside the Story API surface and allows endnote text-style ranges to flow through the same usage scanner as ordinary stories.
-
-The failed v1.0.4 run is recorded in `CANARY_FAILURE_v1.0.4.md` and is not release evidence.
-
-### Safeguards carried forward
-
-v1.0.5 includes:
-
-- recursive direct-use scanning across ordinary stories, table cells, nested tables, footnotes, endnote stories, and overset/no-page text;
-- a one-pass dependency index;
-- style identity by ID, specifier, then fully qualified path;
-- fingerprint property validation using `appliedLanguage`;
-- EPUB/HTML `styleExportTagMaps` inspection;
-- a paragraph-style census for the candidate naming families;
-- an explicit delete-after-replace evidence gate;
-- book-scope checks;
-- multi-column `multiselect: true` UI in preparation for later remediation;
-- LOW-first sorting;
-- UTF-8 BOM for CSV output;
-- point-normalized fingerprint measurements;
-- document-state guards; and
-- a provenance header in every CSV with script/release version, run time, document identity, InDesign version/build, book-scope determination, fingerprint schema, warnings, and risk/candidate counts.
-
-`EMPTY SHELL` and `SUBSTANTIVE` are formatting-state attributes. They are not risk classifications. A formatting-empty style can still carry export semantics.
-
-## Risk model
+For each candidate character style, StyleFix reports direct text use, pages and samples, dependency references, EPUB/HTML export mappings, formatting state, canonical-style matches, and one of four risk classifications:
 
 | Risk | Meaning |
 | --- | --- |
-| `LOW` | No direct text use, no dependency or export mapping, supported scans completed, and book scope permits document-only safety. |
-| `MEDIUM` | No confirmed use or dependency, but deletion-safety evidence is incomplete or book scope blocks LOW. |
-| `HIGH` | Direct use without one clean canonical match, or a dependency/export mapping that must be resolved. |
-| `REPLACE` | Direct use, no known dependency/export mapping, and exactly one non-imported substantive canonical character style has the same validated fingerprint. Diagnostic only in v1.0.5. |
+| `LOW` | No direct use or dependency is known and every requirement in the current LOW Authorization Schema is satisfied. |
+| `MEDIUM` | No use or dependency is confirmed, but the evidence chain is incomplete. |
+| `HIGH` | The style is directly used or referenced and cannot be reduced to one clean canonical replacement. |
+| `REPLACE` | The style is directly used, has exactly one validated canonical match, and is a diagnostic replacement candidate. `REPLACE` never authorizes deletion by itself. |
 
-A future delete-after-replace action must satisfy the same evidence completeness required for LOW and must finish with a zero-reference rescan. `REPLACE` alone never authorizes deletion.
+`EMPTY SHELL` and `SUBSTANTIVE` are formatting-state attributes, not risk levels. A formatting-empty style can still carry EPUB export semantics.
 
-## Canary gate
+## Why the capability matrix exists
 
-`StyleFix Canary Test.md` is the binding acceptance test for scanner completeness before any remediation release.
+InDesign DOM exposure differs by version and context. StyleFix therefore probes the traversal paths it intends to use before scanning. Capability and instance presence are reported separately.
 
-Repository artifacts:
+Usage-traversal capabilities are shown in the palette as `SUPPORTED`, `NOT_EXPOSED`, or `FAILED`, with an instance count. A missing usage-critical capability blocks `LOW` unless an operator records an explicit, session-scoped assertion based on an independent check. Assertions record the capability, operator, time, and basis in CSV and diagnostic provenance.
 
-- `StyleFix Canary Test.md` defines the control matrix and pass criteria.
-- `BuildCanary.jsx` creates a new scratch InDesign fixture. It never edits the active production document.
-- `CANARY_EXPECTED.csv` records the expected result for every control.
-- `VERSION` is the repository release marker.
+The **Save Diagnostic** button writes the capability matrix, InDesign version/build, operating system, installed-artifact parity, fixture metadata, assertions, warnings, and LOW authorization state to a text file suitable for a bug report.
 
-Run `BuildCanary.jsx` first. The builder writes a scratch INDD and build log to the Desktop. A build with any failed construction step is invalid and must not be used as release evidence.
+## LOW Authorization Schema 1
 
-Then run `StyleFix.jsx` against the fixture and save the CSV. The canary release is blocked by any failed control in `StyleFix Canary Test.md`.
+A `LOW` result in v1.0.6 requires all five components to be YES:
 
-The direct-use matrix includes ordinary story text, table cells, nested tables, footnotes, endnotes, overset text, pasteboard and parent-page stories, anchored frames, grouped frames, hidden and locked layers, threaded stories, and a parent-page table.
+1. Usage Traversal Complete
+2. Dependency Scan Complete
+3. Fingerprint Schema Complete
+4. Export Map Scan Complete
+5. Book Scope Acceptable
 
-Dependency controls cover bullets, nested GREP, TOC page-number styles, cross-reference building blocks, hyperlink text sources, footnote markers, and `basedOn`.
+The CSV records `LOW Authorization Schema = 1`. The schema number will increase whenever the authorization conjunction changes, so archived reports cannot be mistaken for satisfying a newer standard.
 
-Formatting/export controls verify empty-shell behavior, export-tag safety, single-match replacement, tracking-only mismatch, and duplicate canonical matches.
+## Installation for v1.0.6
 
-## EPUB semantic safety
+v1.0.6 is still using the development module layout.
 
-For each candidate character style, StyleFix inspects `styleExportTagMaps` when exposed by the installed InDesign DOM. An explicit export map counts as a semantic dependency and prevents LOW.
+1. Close any running StyleFix palette.
+2. In the InDesign Scripts Panel folder, **delete the previously installed `src` folder**. Do not merge a new release into the old folder.
+3. Copy `StyleFix.jsx` and the complete repository `src` folder into the Scripts Panel folder.
+4. Run `StyleFix.jsx`.
 
-If export-tag-map inspection cannot be completed, LOW is blocked.
+The loader reads the module files as text and checks the installed module set before evaluating it. A missing or incompatible module stops execution with an installed-artifact parity error.
 
-## Book scope
+The palette and CSV provenance show the resolved loader/base/patch versions and parity result.
 
-StyleFix checks open InDesign books and also reports nearby `.indb` files as potential unresolved scope.
+Single-file packaging is required before the first public remediation release.
 
-Runtime inspection cannot prove membership in an unopened book located elsewhere. Book scope remains a documented production precondition in addition to the runtime checks.
+## Normal audit use
 
-## Recommended tool order
+Open the INDD to inspect and run `StyleFix.jsx`.
 
-1. **DocStats** for broad document inventory and discrepancy discovery.
-2. **HeaderFix** for fixed section markers.
-3. **NormalFix** for body-text paragraph cleanup and `CLI Code Red Body` conversion.
-4. **TableFix** for table semantics, table paragraph styles, and `CLI Code Red Table` preservation.
-5. **StyleFix** for imported-style debris audit and future guarded consolidation/deletion.
-6. **DocStats** again for final validation before export.
+Review the capability matrix before interpreting risk. Save the CSV for the audit record. Use **Save Diagnostic** if the capability matrix contains `NOT_EXPOSED` or `FAILED`, if the scan reports warnings, or when reporting a compatibility problem.
 
-NormalFix and TableFix should establish canonical red CLI character styles before any future StyleFix replacement operation.
+A `LOW` row means the complete v1.0.6 authorization chain passed for that run. It is still audit information in v1.0.6. No deletion command exists.
 
-## Planned remediation
+## Canary acceptance harness
 
-Remediation remains disabled until the canary passes on the same InDesign build used for production.
+Remediation is blocked until the canary passes on the same InDesign build used for production.
 
-The planned release will use the established multi-select pattern:
+The repository contains:
+
+- `StyleFix Canary Test.md` — binding acceptance specification.
+- `BuildCanary.jsx` — creates the scratch fixture and performs an independent direct-object read-back.
+- `CANARY_EXPECTED.csv` — expected StyleFix classifications.
+- `VerifyCanaryIDML.py` — third measurement that parses exported IDML independently of both ExtendScript paths.
+- `CANARY_FAILURES.csv` — structured failure history.
+- `VERSION` — repository release marker.
+
+`BuildCanary.jsx` generates an INDD, IDML, build log, and builder census. A fixture is invalid if the build log reports any failed construction or read-back step.
+
+The IDML verifier then checks that the planted direct-use controls exist in `Stories/*.xml`. Only after those independent measurements pass should StyleFix scan the fixture.
+
+The StyleFix CSV includes both the script version and fixture version so a run cannot be graded against the wrong expectation set.
+
+## Remediation policy
+
+Deletion and replacement remain disabled.
+
+The planned remediation release will keep the existing multi-select pattern:
 
 - Ctrl-click and Shift-click selection;
-- **Delete Selected Safe Styles** for re-verified LOW candidates;
-- **Replace Selected With Canonical Style** for explicitly reviewed matches;
-- immediate usage/dependency/export/book-scope re-check before every mutation;
-- zero-reference verification before deletion;
-- automatic rescan and Corrected / Skipped / Could not verify reporting;
-- no unrestricted Delete All operation.
+- **Delete Selected Safe Styles** only for candidates re-verified against the current LOW authorization schema;
+- **Replace Selected With Canonical Style** only for explicitly reviewed matches;
+- delete-after-replace permitted only after the same evidence completeness required for LOW plus a zero-reference rescan;
+- automatic verification after every mutation;
+- no unrestricted **Delete All** operation.
 
-## Compatibility and repository layout
+Audit-only operation is a valid permanent deployment posture. A refusal to delete is safer than an incorrect deletion.
 
-The scripts are written for Adobe InDesign ExtendScript / ECMAScript 3 compatibility.
+## Development notes
 
-`StyleFix.jsx` is the v1.0.5 loader and the `src/StyleFix.part*.jsxinc` files contain the audited implementation. Keep the `src` folder beside `StyleFix.jsx` when running the repository version. The loader assembles the source in order and reports a missing-component error rather than running a partial artifact.
+The engineering rationale, evidence model, tool-order guidance, packaging plan, and remediation design are maintained in [DESIGN_NOTES.md](DESIGN_NOTES.md).
 
-A self-contained deployable `StyleFix.jsx` is planned after the canary passes, so packaging changes do not obscure scanner correctness during this test cycle.
+## Public-use status
+
+StyleFix is being developed as a community utility rather than as a one-document cleanup script. Compatibility reporting and conservative refusal are therefore part of the product surface.
+
+A formal open-source license has not yet been selected. That choice remains with the repository owner before the first public release.
+
+Use StyleFix on backed-up documents and validate results independently. The software is provided without warranty.

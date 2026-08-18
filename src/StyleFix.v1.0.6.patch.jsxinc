@@ -1,0 +1,1228 @@
+/* STYLEFIX_PATCH_VERSION: 1.0.6
+StyleFix v1.0.6 harness-hardening override.
+
+This module is appended inside the v1.0.5 base IIFE by the v1.0.6 runtime
+loader. Function declarations below intentionally replace selected base
+functions before the IIFE begins execution.
+*/
+
+var v106State;
+
+function state106() {
+    if (v106State === undefined || v106State === null) {
+        v106State = {
+            traversalAudit:null,
+            operatorAssertions:[],
+            lowAuthorization:null
+        };
+    }
+    return v106State;
+}
+
+function runtime106() {
+    try {
+        if ($.global.__STYLEFIX_LOADER_RUNTIME) {
+            return $.global.__STYLEFIX_LOADER_RUNTIME;
+        }
+    } catch (e) {}
+    return {
+        loaderVersion:"unknown",
+        baseVersion:"unknown",
+        patchVersion:"unknown",
+        parity:"UNKNOWN",
+        moduleChecks:"",
+        installedFile:""
+    };
+}
+
+function lowAuthSchema106() { return "1"; }
+
+function scan() {
+    var doc, allChar, allPara, candidates, canonical;
+    var usageAudit, depAudit, schemaAudit, bookAudit, census, capAudit, auth;
+    var oldUnit = null;
+    var i, style, usage, deps, matches, risk, deletionGate, substantive, family;
+
+    if (app.documents.length === 0) {
+        rows = [];
+        refreshNoDocument();
+        alert("StyleFix v" + VERSION + "\n\nNo InDesign document is open.");
+        return;
+    }
+
+    doc = app.activeDocument;
+    rows = [];
+    counts = newCounts();
+    scanMeta = newScanMeta(doc);
+
+    try {
+        oldUnit = app.scriptPreferences.measurementUnit;
+        app.scriptPreferences.measurementUnit = MeasurementUnits.POINTS;
+    } catch (eUnit) {}
+
+    try {
+        allChar = safeAllCharacterStyles(doc);
+        allPara = safeAllParagraphStyles(doc);
+        candidates = [];
+        canonical = [];
+
+        counts.characterStyles = allChar.length;
+        counts.paragraphStyles = allPara.length;
+
+        for (i = 0; i < allChar.length; i++) {
+            style = allChar[i];
+            if (!valid(style)) { continue; }
+            if (isAuditCandidate(style)) {
+                candidates.push(style);
+                family = candidateFamily(style);
+                if (family === "Unnamed Style") { counts.unnamedCharacterStyles++; }
+                if (family === "Word Imported List Style") { counts.wordListCharacterStyles++; }
+            }
+        }
+        counts.candidateStyles = candidates.length;
+
+        census = censusParagraphDebris(allPara);
+        counts.unnamedParagraphStyles = census.unnamed;
+        counts.wordListParagraphStyles = census.wordList;
+
+        schemaAudit = validateFingerprintProperties(allChar);
+        fingerprintProps = schemaAudit.active;
+        counts.fingerprintWarnings = schemaAudit.warnings.length;
+        scanMeta.fingerprintActive = fingerprintProps.join(" | ");
+        scanMeta.fingerprintWarnings = schemaAudit.warnings.join(" | ");
+
+        for (i = 0; i < allChar.length; i++) {
+            style = allChar[i];
+            if (valid(style) && isCanonicalCandidate(style)) { canonical.push(style); }
+        }
+
+        status("Probing traversal capabilities...");
+        capAudit = probeTraversalCapabilities106(doc);
+        state106().traversalAudit = capAudit;
+
+        status("Scanning direct usage...");
+        usageAudit = buildUsageMap(doc, candidates, capAudit);
+
+        status("Indexing dependencies...");
+        depAudit = buildDependencyMap(doc, candidates, allChar);
+        bookAudit = bookScopeState(doc);
+
+        auth = lowAuthorization106(usageAudit, depAudit, schemaAudit, bookAudit, capAudit);
+        state106().lowAuthorization = auth;
+
+        counts.usageWarnings = usageAudit.errors;
+        counts.dependencyWarnings = depAudit.errors;
+        counts.dependencyNA = depAudit.na.length;
+        counts.bookScope = bookAudit.label;
+        counts.traversalBlocksLow = capAudit.blockLow ? 1 : 0;
+
+        scanMeta.bookScope = bookAudit.label;
+        scanMeta.bookMethod = bookAudit.method;
+        scanMeta.usageWarnings = usageAudit.errorDetails.join(" | ");
+        scanMeta.dependencyWarnings = depAudit.errorDetails.join(" | ");
+        scanMeta.dependencyNA = depAudit.na.join(" | ");
+        scanMeta.traversalCapabilitySummary = capabilitySummary106(capAudit);
+        scanMeta.traversalAssertions = assertionsSummary106(doc);
+        scanMeta.lowAuthorizationSchema = lowAuthSchema106();
+        scanMeta.lowAuthorizationSummary = lowAuthorizationSummary106(auth);
+        scanMeta.fixtureVersion = readDocLabel106(doc, "StyleFixFixtureVersion");
+        scanMeta.fixtureSchema = readDocLabel106(doc, "StyleFixFixtureSchema");
+        scanMeta.fixtureId = readDocLabel106(doc, "StyleFixFixtureId");
+
+        for (i = 0; i < candidates.length; i++) {
+            style = candidates[i];
+            status("Auditing " + (i + 1) + " of " + candidates.length + ": " + styleName(style));
+
+            usage = usageAudit.map[styleKey(style)] || emptyUsage();
+            deps = depAudit.map[styleKey(style)] || emptyDependency();
+            substantive = hasSubstantiveFormatting(style);
+            matches = substantive ? equivalentCanonicalStyles(style, canonical) : [];
+
+            risk = classifyRisk106(usage, deps, matches, auth);
+            deletionGate = deleteAfterReplaceGate106(risk, deps, auth);
+
+            if (usage.runs > 0) { counts.directlyUsed++; }
+            if (deps.count > 0) { counts.referenced++; }
+            if (deps.exportMapCount > 0) { counts.exportMapped++; }
+            if (importedState(style) === "Yes") { counts.imported++; }
+
+            if (risk === "LOW") { counts.low++; }
+            else if (risk === "MEDIUM") { counts.medium++; }
+            else if (risk === "HIGH") { counts.high++; }
+            else if (risk === "REPLACE") { counts.replace++; }
+
+            rows.push({
+                risk:risk,
+                family:candidateFamily(style),
+                styleName:styleName(style),
+                styleId:safeProperty(style, "id", "-"),
+                stylePath:styleQualifiedPath(style),
+                imported:importedState(style),
+                basedOn:styleRefName(safePropertyObject(style, "basedOn")),
+                formattingState:substantive ? "SUBSTANTIVE" : "EMPTY SHELL",
+                semanticState:deps.exportMapCount > 0 ? "EXPORT-MAPPED" : "NO EXPORT MAP",
+                directRuns:usage.runs,
+                characters:usage.characters,
+                storyRuns:usage.storyRuns,
+                tableRuns:usage.tableRuns,
+                nestedTableRuns:usage.nestedTableRuns,
+                footnoteRuns:usage.footnoteRuns,
+                endnoteRuns:usage.endnoteRuns,
+                oversetRuns:usage.oversetRuns,
+                pages:usagePageText(usage),
+                samples:usage.samples.join(" | "),
+                firstUsage:usage.firstUsage,
+                firstPageRef:usage.firstPageRef,
+                firstPageSort:usage.firstPageSort,
+                dependencyCount:deps.count,
+                dependencies:deps.details.join(" | "),
+                exportMapCount:deps.exportMapCount,
+                exportMaps:deps.exportDetails.join(" | "),
+                canonicalMatch:matches.length === 1 ? styleName(matches[0]) :
+                    (matches.length > 1 ? joinStyleNames(matches) : ""),
+                matchCount:matches.length,
+                deleteAfterReplaceGate:deletionGate,
+                suggestedAction:suggestedAction106(risk, matches, deps, substantive, deletionGate),
+                fingerprint:formattingFingerprint(style),
+                usageWarningCount:usageAudit.errors,
+                usageWarnings:usageAudit.errorDetails.join(" | "),
+                dependencyWarningCount:depAudit.errors,
+                dependencyWarnings:depAudit.errorDetails.join(" | "),
+                dependencyNA:depAudit.na.join(" | "),
+                fingerprintWarningCount:schemaAudit.warnings.length,
+                fingerprintWarnings:schemaAudit.warnings.join(" | "),
+                bookScope:bookAudit.label,
+                paragraphUnnamedCount:census.unnamed,
+                paragraphWordListCount:census.wordList,
+                style:style
+            });
+        }
+
+        sortRows();
+        refresh(doc);
+        status(rows.length > 0 ?
+            "Scan complete. Review capability matrix, then export CSV or Save Diagnostic." :
+            "Scan complete. No candidate character styles were found; check paragraph census.");
+    } catch (eScan) {
+        status("Scan failed: " + errorSummary(eScan));
+        alert("StyleFix scan failed.\n\n" + errorSummary(eScan));
+    } finally {
+        if (oldUnit !== null) {
+            try { app.scriptPreferences.measurementUnit = oldUnit; } catch (eRestore) {}
+        }
+    }
+}
+
+function newCounts() {
+    return {
+        characterStyles:0, paragraphStyles:0, candidateStyles:0,
+        unnamedCharacterStyles:0, wordListCharacterStyles:0,
+        unnamedParagraphStyles:0, wordListParagraphStyles:0,
+        low:0, medium:0, high:0, replace:0,
+        directlyUsed:0, referenced:0, exportMapped:0, imported:0,
+        usageWarnings:0, dependencyWarnings:0, dependencyNA:0,
+        fingerprintWarnings:0, bookScope:"Standalone/No book evidence",
+        traversalBlocksLow:0
+    };
+}
+
+function newScanMeta(doc) {
+    var rt = runtime106();
+    return {
+        scanTimestamp:(new Date()).toString(),
+        documentName:docName(doc),
+        documentModified:fileModifiedText(doc),
+        indesignVersion:safeAppProperty("version"),
+        indesignBuild:safeAppProperty("buildNumber"),
+        operatingSystem:safeOs106(),
+        loaderVersion:rt.loaderVersion,
+        baseVersion:rt.baseVersion,
+        patchVersion:rt.patchVersion,
+        installedParity:rt.parity,
+        moduleChecks:rt.moduleChecks,
+        installedFile:rt.installedFile,
+        fixtureVersion:"",
+        fixtureSchema:"",
+        fixtureId:"",
+        bookScope:"",
+        bookMethod:"",
+        fingerprintActive:"",
+        fingerprintWarnings:"",
+        usageWarnings:"",
+        dependencyWarnings:"",
+        dependencyNA:"",
+        traversalCapabilitySummary:"",
+        traversalAssertions:"",
+        lowAuthorizationSchema:lowAuthSchema106(),
+        lowAuthorizationSummary:""
+    };
+}
+
+function probeTraversalCapabilities106(doc) {
+    var audit = {items:[], byCode:{}, blockLow:false, blockReasons:[]};
+    var storiesProbe, stories, story, storyCount;
+    var tableCount = 0, cellCount = 0, footnoteCount = 0, endnoteStoryCount = 0;
+    var firstTable = null, firstCell = null, firstText = null, firstFootnote = null;
+    var i, col, p, item, tables, cells, footnotes;
+
+    storiesProbe = probeProperty106(doc, "stories");
+    if (storiesProbe.state === "SUPPORTED") {
+        stories = collectionElements(storiesProbe.value);
+        storyCount = stories.length;
+    } else {
+        stories = [];
+        storyCount = "UNKNOWN";
+    }
+    addCapability106(audit, doc, "DOCUMENT_STORIES", "Document.stories",
+        storiesProbe.state, storyCount, true, storiesProbe.note);
+
+    if (stories.length === 0 && storiesProbe.state === "SUPPORTED") {
+        addCapability106(audit, doc, "STORY_TEXT_STYLE_RANGES", "Story.textStyleRanges",
+            "SUPPORTED", 0, true, "No story instances; Document.stories is empty.");
+        addCapability106(audit, doc, "STORY_TABLES", "Story.tables",
+            "SUPPORTED", 0, true, "No story instances.");
+        addCapability106(audit, doc, "STORY_FOOTNOTES", "Story.footnotes",
+            "SUPPORTED", 0, true, "No story instances.");
+        addCapability106(audit, doc, "ENDNOTE_CLASSIFICATION", "Story.isEndnoteStory / storyType",
+            "SUPPORTED", 0, false, "No story instances.");
+    } else if (stories.length > 0) {
+        story = firstValid106(stories);
+        p = probeProperty106(story, "textStyleRanges");
+        addCapability106(audit, doc, "STORY_TEXT_STYLE_RANGES", "Story.textStyleRanges",
+            p.state, countCollectionValue106(p), true, p.note);
+
+        p = probeProperty106(story, "tables");
+        if (p.state === "SUPPORTED") {
+            for (i = 0; i < stories.length; i++) {
+                col = probeProperty106(stories[i], "tables");
+                if (col.state !== "SUPPORTED") { continue; }
+                tables = collectionElements(col.value);
+                tableCount += tables.length;
+                if (firstTable === null && tables.length > 0) { firstTable = tables[0]; }
+            }
+        }
+        addCapability106(audit, doc, "STORY_TABLES", "Story.tables",
+            p.state, p.state === "SUPPORTED" ? tableCount : "UNKNOWN", true, p.note);
+
+        p = probeProperty106(story, "footnotes");
+        if (p.state === "SUPPORTED") {
+            for (i = 0; i < stories.length; i++) {
+                col = probeProperty106(stories[i], "footnotes");
+                if (col.state !== "SUPPORTED") { continue; }
+                footnotes = collectionElements(col.value);
+                footnoteCount += footnotes.length;
+                if (firstFootnote === null && footnotes.length > 0) { firstFootnote = footnotes[0]; }
+            }
+        }
+        addCapability106(audit, doc, "STORY_FOOTNOTES", "Story.footnotes",
+            p.state, p.state === "SUPPORTED" ? footnoteCount : "UNKNOWN", true, p.note);
+
+        p = probeProperty106(story, "isEndnoteStory");
+        if (p.state === "SUPPORTED") {
+            for (i = 0; i < stories.length; i++) {
+                try { if (stories[i].isEndnoteStory === true) { endnoteStoryCount++; } } catch (ignoreFlag) {}
+            }
+            addCapability106(audit, doc, "ENDNOTE_CLASSIFICATION", "Story.isEndnoteStory",
+                "SUPPORTED", endnoteStoryCount, false, "");
+        } else {
+            p = probeProperty106(story, "storyType");
+            if (p.state === "SUPPORTED") {
+                for (i = 0; i < stories.length; i++) {
+                    try {
+                        if (StoryTypes !== undefined &&
+                            stories[i].storyType === StoryTypes.ENDNOTE_STORY) {
+                            endnoteStoryCount++;
+                        }
+                    } catch (ignoreType) {}
+                }
+                addCapability106(audit, doc, "ENDNOTE_CLASSIFICATION", "Story.storyType fallback",
+                    "SUPPORTED", endnoteStoryCount, false,
+                    "isEndnoteStory unavailable; storyType fallback exposed.");
+            } else {
+                addCapability106(audit, doc, "ENDNOTE_CLASSIFICATION", "Endnote story classification",
+                    p.state, "UNKNOWN", false,
+                    "Context classification unavailable. All stories are still scanned for direct use.");
+            }
+        }
+    }
+
+    item = getCapability106(audit, "STORY_TABLES");
+    if (item && item.state === "SUPPORTED" && Number(item.instances) === 0) {
+        addCapability106(audit, doc, "TABLE_CELLS", "Table.cells",
+            "SUPPORTED", 0, true, "No table instances.");
+        addCapability106(audit, doc, "CELL_TEXTS", "Cell.texts",
+            "SUPPORTED", 0, true, "No cell instances.");
+        addCapability106(audit, doc, "TEXT_TABLES", "Text.tables (nested tables)",
+            "SUPPORTED", 0, true, "No cell text instances.");
+        addCapability106(audit, doc, "TEXT_TEXT_STYLE_RANGES", "Text.textStyleRanges",
+            "SUPPORTED", 0, true, "No cell/note text instances.");
+    } else if (firstTable !== null) {
+        p = probeProperty106(firstTable, "cells");
+        if (p.state === "SUPPORTED") {
+            cells = collectionElements(p.value);
+            cellCount = cells.length;
+            if (cells.length > 0) { firstCell = cells[0]; }
+        }
+        addCapability106(audit, doc, "TABLE_CELLS", "Table.cells",
+            p.state, p.state === "SUPPORTED" ? cellCount : "UNKNOWN", true, p.note);
+
+        if (firstCell !== null) {
+            p = probeProperty106(firstCell, "texts");
+            if (p.state === "SUPPORTED") {
+                col = collectionElements(p.value);
+                if (col.length > 0) { firstText = col[0]; }
+            }
+            addCapability106(audit, doc, "CELL_TEXTS", "Cell.texts",
+                p.state, p.state === "SUPPORTED" ? 1 : "UNKNOWN", true, p.note);
+        } else {
+            addCapability106(audit, doc, "CELL_TEXTS", "Cell.texts",
+                "SUPPORTED", 0, true, "Table exposes zero cells.");
+        }
+
+        if (firstText !== null) {
+            p = probeProperty106(firstText, "tables");
+            addCapability106(audit, doc, "TEXT_TABLES", "Text.tables (nested tables)",
+                p.state, countCollectionValue106(p), true, p.note);
+            p = probeProperty106(firstText, "textStyleRanges");
+            addCapability106(audit, doc, "TEXT_TEXT_STYLE_RANGES", "Text.textStyleRanges",
+                p.state, countCollectionValue106(p), true, p.note);
+        } else {
+            addCapability106(audit, doc, "TEXT_TABLES", "Text.tables (nested tables)",
+                "SUPPORTED", 0, true, "No cell text instance.");
+            addCapability106(audit, doc, "TEXT_TEXT_STYLE_RANGES", "Text.textStyleRanges",
+                "SUPPORTED", 0, true, "No cell text instance.");
+        }
+    }
+
+    item = getCapability106(audit, "STORY_FOOTNOTES");
+    if (item && item.state === "SUPPORTED" && Number(item.instances) === 0) {
+        addCapability106(audit, doc, "FOOTNOTE_TEXTS", "Footnote.texts",
+            "SUPPORTED", 0, true, "No footnote instances.");
+    } else if (firstFootnote !== null) {
+        p = probeProperty106(firstFootnote, "texts");
+        addCapability106(audit, doc, "FOOTNOTE_TEXTS", "Footnote.texts",
+            p.state, countCollectionValue106(p), true, p.note);
+    }
+
+    p = probeProperty106(doc, "endnoteTextFrames");
+    addCapability106(audit, doc, "ENDNOTE_TEXT_FRAMES", "Document.endnoteTextFrames",
+        p.state, p.state === "SUPPORTED" ? countCollectionValue106(p) : "UNKNOWN",
+        false, p.note);
+    addEndnoteCoverageCapability106(audit, doc, stories, endnoteStoryCount, p);
+
+    finalizeCapabilityGate106(audit, doc);
+    return audit;
+}
+
+function addEndnoteCoverageCapability106(audit, doc, stories, classifiedCount, frameProbe) {
+    var frames, i, storyKeys = {}, story, key, uncovered = 0;
+    var classification = getCapability106(audit, "ENDNOTE_CLASSIFICATION");
+
+    if (frameProbe.state === "SUPPORTED") {
+        frames = collectionElements(frameProbe.value);
+        if (frames.length === 0) {
+            addCapability106(audit, doc, "ENDNOTE_COVERAGE", "Endnote usage coverage",
+                "SUPPORTED", 0, true, "Document.endnoteTextFrames exposes zero instances.");
+            return;
+        }
+
+        for (i = 0; i < stories.length; i++) {
+            key = objectKey(stories[i]);
+            if (key !== "") { storyKeys[key] = true; }
+        }
+
+        for (i = 0; i < frames.length; i++) {
+            story = safePropertyObject(frames[i], "parentStory");
+            key = objectKey(story);
+            if (key === "" || storyKeys[key] !== true) { uncovered++; }
+        }
+
+        if (uncovered === 0) {
+            addCapability106(audit, doc, "ENDNOTE_COVERAGE", "Endnote usage coverage",
+                "SUPPORTED", frames.length, true,
+                "Every exposed endnote text frame resolves to a story already present in Document.stories.");
+        } else {
+            addCapability106(audit, doc, "ENDNOTE_COVERAGE", "Endnote usage coverage",
+                "FAILED", frames.length, true,
+                uncovered + " endnote text frame(s) did not resolve to a scanned document story.");
+        }
+        return;
+    }
+
+    if (classification && classification.state === "SUPPORTED") {
+        addCapability106(audit, doc, "ENDNOTE_COVERAGE", "Endnote usage coverage",
+            "SUPPORTED", classifiedCount, true,
+            "Document story classification completed; endnoteTextFrames is unavailable.");
+        return;
+    }
+
+    addCapability106(audit, doc, "ENDNOTE_COVERAGE", "Endnote usage coverage",
+        frameProbe.state === "FAILED" ? "FAILED" : "NOT_EXPOSED",
+        "UNKNOWN", true,
+        "Neither endnote text-frame coverage nor endnote-story classification could establish coverage.");
+}
+
+function probeProperty106(obj, prop) {
+    var value, n;
+    if (obj === null || obj === undefined) {
+        return {state:"FAILED", value:null, note:"No probe object."};
+    }
+    try {
+        value = obj[prop];
+        if (value === undefined) {
+            return {state:"NOT_EXPOSED", value:null, note:"Property returned undefined."};
+        }
+        return {state:"SUPPORTED", value:value, note:""};
+    } catch (e) {
+        try { n = Number(e.number); } catch (ignore) { n = 0; }
+        if (n === 55 || String(errorSummary(e)).indexOf("does not support") >= 0) {
+            return {state:"NOT_EXPOSED", value:null, note:errorSummary(e)};
+        }
+        return {state:"FAILED", value:null, note:errorSummary(e)};
+    }
+}
+
+function countCollectionValue106(probe) {
+    if (!probe || probe.state !== "SUPPORTED") { return "UNKNOWN"; }
+    try { return collectionElements(probe.value).length; } catch (e) { return "UNKNOWN"; }
+}
+
+function firstValid106(items) {
+    var i;
+    for (i = 0; i < items.length; i++) {
+        if (valid(items[i])) { return items[i]; }
+    }
+    return null;
+}
+
+function addCapability106(audit, doc, code, label, state, instances, critical, note) {
+    var assertion = findAssertion106(doc, code);
+    var item = {
+        code:code,
+        label:label,
+        state:state,
+        instances:instances,
+        critical:critical === true,
+        note:note || "",
+        assertion:assertion
+    };
+    audit.items.push(item);
+    audit.byCode[code] = item;
+}
+
+function getCapability106(audit, code) {
+    if (!audit || !audit.byCode) { return null; }
+    return audit.byCode[code] || null;
+}
+
+function finalizeCapabilityGate106(audit, doc) {
+    var i, item;
+    audit.blockLow = false;
+    audit.blockReasons = [];
+
+    for (i = 0; i < audit.items.length; i++) {
+        item = audit.items[i];
+        if (!item.critical) { continue; }
+        if (item.state === "SUPPORTED") { continue; }
+        if (item.assertion !== null) { continue; }
+
+        audit.blockLow = true;
+        audit.blockReasons.push(item.code + "=" + item.state);
+    }
+}
+
+function capUsable106(audit, code) {
+    var item = getCapability106(audit, code);
+    return item !== null && item.state === "SUPPORTED";
+}
+
+function capabilitySummary106(audit) {
+    var out = [], i, item, gate;
+    if (!audit) { return ""; }
+    for (i = 0; i < audit.items.length; i++) {
+        item = audit.items[i];
+        gate = item.critical ? (item.state === "SUPPORTED" || item.assertion !== null ? "ALLOW" : "BLOCK") : "INFO";
+        out.push(item.code + "=" + item.state +
+            ";instances=" + item.instances +
+            ";gate=" + gate +
+            (item.assertion !== null ? ";asserted=yes" : ""));
+    }
+    return out.join(" | ");
+}
+
+function capabilityPaletteText106(audit) {
+    var lines = [], i, item, gate;
+    if (!audit) { return "Traversal capabilities: scan has not run."; }
+    lines.push("Traversal capability matrix (usage-critical failures block LOW):");
+    for (i = 0; i < audit.items.length; i++) {
+        item = audit.items[i];
+        gate = item.critical ? (item.state === "SUPPORTED" || item.assertion !== null ? "ALLOW" : "BLOCK") : "INFO";
+        lines.push(item.code + "  " + item.state + "  instances=" + item.instances +
+            "  " + gate + (item.assertion !== null ? "  ASSERTED" : ""));
+    }
+    if (audit.blockLow) {
+        lines.push("LOW blocked by traversal: " + audit.blockReasons.join(", "));
+    }
+    return lines.join("\n");
+}
+
+function documentKey106(doc) {
+    var path = filePathKey(safePropertyObject(doc, "fullName"));
+    if (path !== "") { return path; }
+    return "UNSAVED:" + docName(doc);
+}
+
+function findAssertion106(doc, code) {
+    var list = state106().operatorAssertions;
+    var key = documentKey106(doc);
+    var i;
+    for (i = 0; i < list.length; i++) {
+        if (list[i].documentKey === key && list[i].capability === code) {
+            return list[i];
+        }
+    }
+    return null;
+}
+
+function assertionsSummary106(doc) {
+    var list = state106().operatorAssertions;
+    var key = documentKey106(doc);
+    var out = [], i, a;
+    for (i = 0; i < list.length; i++) {
+        a = list[i];
+        if (a.documentKey !== key) { continue; }
+        out.push(a.capability + ";operator=" + a.operator +
+            ";time=" + a.time + ";basis=" + a.basis);
+    }
+    return out.join(" | ");
+}
+
+function recordAssertion106() {
+    var doc, audit, blocked = [], i, item;
+    var dlg, dd, operatorField, basisField, buttons, ok, choice, operatorName, basis;
+
+    if (app.documents.length === 0) {
+        alert("No InDesign document is open.");
+        return;
+    }
+    doc = app.activeDocument;
+    audit = state106().traversalAudit;
+    if (!audit) {
+        alert("Run StyleFix before recording an assertion.");
+        return;
+    }
+
+    for (i = 0; i < audit.items.length; i++) {
+        item = audit.items[i];
+        if (item.critical && item.state !== "SUPPORTED" && item.assertion === null) {
+            blocked.push(item);
+        }
+    }
+    if (blocked.length === 0) {
+        alert("There are no unresolved usage-traversal capabilities that require an assertion.");
+        return;
+    }
+
+    dlg = new Window("dialog", "Record StyleFix Usage Assertion");
+    dlg.orientation = "column";
+    dlg.alignChildren = ["fill","top"];
+    dlg.add("statictext", undefined,
+        "Use an assertion only when the missing traversal capability has been independently checked.\n" +
+        "The assertion is session-scoped and will be written into CSV/diagnostic provenance.",
+        {multiline:true});
+
+    dd = dlg.add("dropdownlist");
+    for (i = 0; i < blocked.length; i++) {
+        dd.add("item", blocked[i].code + " - " + blocked[i].state);
+    }
+    dd.selection = 0;
+
+    dlg.add("statictext", undefined, "Operator:");
+    operatorField = dlg.add("edittext", undefined, "");
+    dlg.add("statictext", undefined, "Independent basis:");
+    basisField = dlg.add("edittext", undefined, "", {multiline:true});
+    basisField.preferredSize = [520,90];
+
+    buttons = dlg.add("group");
+    buttons.alignment = "right";
+    buttons.add("button", undefined, "Cancel", {name:"cancel"});
+    ok = buttons.add("button", undefined, "Record", {name:"ok"});
+
+    if (dlg.show() !== 1) { return; }
+
+    operatorName = String(operatorField.text).replace(/^\s+|\s+$/g, "");
+    basis = String(basisField.text).replace(/^\s+|\s+$/g, "");
+    if (operatorName === "" || basis === "") {
+        alert("Operator and independent basis are both required.");
+        return;
+    }
+
+    choice = blocked[dd.selection.index];
+    state106().operatorAssertions.push({
+        documentKey:documentKey106(doc),
+        capability:choice.code,
+        operator:operatorName,
+        time:(new Date()).toString(),
+        basis:basis
+    });
+
+    scan();
+}
+
+function buildUsageMap(doc, candidates, capAudit) {
+    var audit = {
+        map:{}, lookup:buildCandidateLookup(candidates),
+        errors:0, errorDetails:[], visited:{}
+    };
+    var stories, i, story, context;
+
+    for (i = 0; i < candidates.length; i++) {
+        audit.map[styleKey(candidates[i])] = emptyUsage();
+    }
+
+    if (!capUsable106(capAudit, "DOCUMENT_STORIES")) {
+        return audit;
+    }
+
+    try {
+        stories = collectionElements(doc.stories);
+    } catch (eStories) {
+        addGlobalAuditError(audit, "Document.stories", eStories);
+        return audit;
+    }
+
+    for (i = 0; i < stories.length; i++) {
+        story = stories[i];
+        if (!valid(story)) { continue; }
+        context = endnoteContext106(story, capAudit) ? "ENDNOTE" : "STORY";
+        scanTextContainer(
+            story,
+            (context === "ENDNOTE" ? "Endnote story " : "Story ") +
+                safeProperty(story, "id", "#" + i),
+            audit, context, 0, true, capAudit
+        );
+    }
+
+    return audit;
+}
+
+function endnoteContext106(story, capAudit) {
+    var cap = getCapability106(capAudit, "ENDNOTE_CLASSIFICATION");
+    if (!cap || cap.state !== "SUPPORTED") { return false; }
+
+    try {
+        if (propertyReadable(story, "isEndnoteStory")) {
+            return story.isEndnoteStory === true;
+        }
+    } catch (ignoreFlag) {}
+
+    try {
+        if (StoryTypes !== undefined && propertyReadable(story, "storyType")) {
+            return story.storyType === StoryTypes.ENDNOTE_STORY;
+        }
+    } catch (ignoreType) {}
+
+    return false;
+}
+
+function scanTextContainer(container, label, audit, context, tableDepth, scanNotes, capAudit) {
+    var key, ranges, tables, notes, i;
+    var textRangeCap, tableCap, footnoteCap;
+
+    if (container === null || container === undefined || !valid(container)) { return; }
+
+    key = objectKey(container);
+    if (key !== "" && audit.visited[key] === true) { return; }
+    if (key !== "") { audit.visited[key] = true; }
+
+    textRangeCap = (context === "STORY" || context === "ENDNOTE") ?
+        "STORY_TEXT_STYLE_RANGES" : "TEXT_TEXT_STYLE_RANGES";
+
+    if (capUsable106(capAudit, textRangeCap)) {
+        try {
+            ranges = collectionElements(container.textStyleRanges);
+            for (i = 0; i < ranges.length; i++) {
+                recordUsageRange(ranges[i], audit, context, tableDepth);
+            }
+        } catch (eRanges) {
+            addGlobalAuditError(audit, label + " textStyleRanges", eRanges);
+        }
+    }
+
+    tableCap = (context === "STORY" || context === "ENDNOTE") ?
+        "STORY_TABLES" : "TEXT_TABLES";
+
+    if (capUsable106(capAudit, tableCap)) {
+        try {
+            tables = collectionElements(container.tables);
+            for (i = 0; i < tables.length; i++) {
+                scanTable(tables[i], label + " table " + i, audit, tableDepth + 1, capAudit);
+            }
+        } catch (eTables) {
+            addGlobalAuditError(audit, label + " tables", eTables);
+        }
+    }
+
+    if (scanNotes === true) {
+        footnoteCap = (context === "STORY" || context === "ENDNOTE") ?
+            "STORY_FOOTNOTES" : "TEXT_FOOTNOTES";
+
+        if (footnoteCap === "TEXT_FOOTNOTES" &&
+            getCapability106(capAudit, "TEXT_FOOTNOTES") === null) {
+            addLazyTextFootnoteCapability106(capAudit, container);
+        }
+
+        if (capUsable106(capAudit, footnoteCap)) {
+            try {
+                notes = collectionElements(container.footnotes);
+                for (i = 0; i < notes.length; i++) {
+                    scanNoteObject(notes[i], label + " footnote " + i, audit,
+                        "FOOTNOTE", tableDepth, capAudit);
+                }
+            } catch (eFootnotes) {
+                addGlobalAuditError(audit, label + " footnotes", eFootnotes);
+            }
+        }
+    }
+}
+
+function addLazyTextFootnoteCapability106(capAudit, container) {
+    var p = probeProperty106(container, "footnotes");
+    var doc = app.activeDocument;
+    addCapability106(capAudit, doc, "TEXT_FOOTNOTES", "Text.footnotes",
+        p.state, p.state === "SUPPORTED" ? countCollectionValue106(p) : "UNKNOWN",
+        true, p.note);
+    finalizeCapabilityGate106(capAudit, doc);
+}
+
+function scanTable(table, label, audit, tableDepth, capAudit) {
+    var cells, i, text;
+    if (!valid(table)) { return; }
+    if (!capUsable106(capAudit, "TABLE_CELLS")) { return; }
+
+    try {
+        cells = collectionElements(table.cells);
+        for (i = 0; i < cells.length; i++) {
+            if (!valid(cells[i])) { continue; }
+            if (!capUsable106(capAudit, "CELL_TEXTS")) { continue; }
+            text = firstTextObject(cells[i]);
+            if (text !== null) {
+                scanTextContainer(text, label + " cell " + i, audit,
+                    "TABLE", tableDepth, true, capAudit);
+            }
+        }
+    } catch (eCells) {
+        addGlobalAuditError(audit, label + " cells", eCells);
+    }
+}
+
+function scanNoteObject(note, label, audit, context, tableDepth, capAudit) {
+    var text;
+    if (!capUsable106(capAudit, "FOOTNOTE_TEXTS")) { return; }
+    text = firstTextObject(note);
+    if (text !== null) {
+        scanTextContainer(text, label, audit, context, tableDepth, true, capAudit);
+    }
+}
+
+function lowAuthorization106(usageAudit, depAudit, schemaAudit, bookAudit, capAudit) {
+    var exportOk = exportMapScanComplete106(depAudit);
+    var components = {
+        UsageTraversalComplete:(usageAudit.errors === 0 && !capAudit.blockLow),
+        DependencyScanComplete:(depAudit.errors === 0),
+        FingerprintSchemaComplete:(schemaAudit.warnings.length === 0),
+        ExportMapScanComplete:exportOk,
+        BookScopeAcceptable:(!bookAudit.blocksLow)
+    };
+    var authorized =
+        components.UsageTraversalComplete &&
+        components.DependencyScanComplete &&
+        components.FingerprintSchemaComplete &&
+        components.ExportMapScanComplete &&
+        components.BookScopeAcceptable;
+
+    return {schema:lowAuthSchema106(), components:components, authorized:authorized};
+}
+
+function exportMapScanComplete106(depAudit) {
+    var i, s;
+    if (depAudit.errors === 0) { return true; }
+    for (i = 0; i < depAudit.errorDetails.length; i++) {
+        s = String(depAudit.errorDetails[i]);
+        if (s.indexOf("styleExportTagMaps") >= 0 ||
+            s.indexOf("Style export tag maps") >= 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function lowAuthorizationSummary106(auth) {
+    var c = auth.components;
+    return "schema=" + auth.schema +
+        ";UsageTraversalComplete=" + yesNo106(c.UsageTraversalComplete) +
+        ";DependencyScanComplete=" + yesNo106(c.DependencyScanComplete) +
+        ";FingerprintSchemaComplete=" + yesNo106(c.FingerprintSchemaComplete) +
+        ";ExportMapScanComplete=" + yesNo106(c.ExportMapScanComplete) +
+        ";BookScopeAcceptable=" + yesNo106(c.BookScopeAcceptable) +
+        ";AUTHORIZED=" + yesNo106(auth.authorized);
+}
+
+function yesNo106(value) { return value ? "YES" : "NO"; }
+
+function classifyRisk106(usage, deps, matches, auth) {
+    if (deps.count > 0) { return "HIGH"; }
+
+    if (usage.runs > 0) {
+        if (matches.length === 1 && auth.components.FingerprintSchemaComplete) {
+            return "REPLACE";
+        }
+        return "HIGH";
+    }
+
+    if (!auth.authorized) { return "MEDIUM"; }
+    return "LOW";
+}
+
+function deleteAfterReplaceGate106(risk, deps, auth) {
+    if (risk !== "REPLACE") { return "N/A"; }
+    if (!auth.authorized) {
+        return "BLOCKED: LOW authorization schema " + auth.schema + " is not satisfied";
+    }
+    if (deps.count > 0) {
+        return "BLOCKED: dependencies remain";
+    }
+    return "ELIGIBLE ONLY AFTER VERIFIED REPLACEMENT + ZERO-REFERENCE RESCAN";
+}
+
+function suggestedAction106(risk, matches, deps, substantive, deletionGate) {
+    if (risk === "LOW") {
+        return substantive ?
+            "Safe deletion candidate after selected re-check" :
+            "EMPTY SHELL formatting; safe deletion candidate after selected re-check";
+    }
+    if (risk === "MEDIUM") {
+        return substantive ?
+            "LOW authorization incomplete; review capability/scan/book evidence" :
+            "EMPTY SHELL formatting; LOW authorization incomplete";
+    }
+    if (risk === "REPLACE") {
+        return "Candidate replacement with " + styleName(matches[0]) +
+            "; delete gate: " + deletionGate;
+    }
+    if (deps.exportMapCount > 0) {
+        return "Preserve/review EPUB export mapping before any deletion";
+    }
+    if (deps.count > 0) { return "Resolve dependencies before deletion"; }
+    return "Review applied text before deletion";
+}
+
+function readDocLabel106(doc, key) {
+    try { return String(doc.extractLabel(key)); } catch (e) { return ""; }
+}
+
+function buildUI() {
+    var buttons, button;
+    var props = {
+        multiselect:true,
+        numberOfColumns:12,
+        showHeaders:true,
+        columnTitles:["Risk","Style","Format","Runs","Story","Table","Nested","Foot","End","Over","Deps","Pages"],
+        columnWidths:[60,210,95,55,55,55,55,55,55,55,55,180]
+    };
+
+    ui.win = new Window("palette", "StyleFix v" + VERSION);
+    ui.win.orientation = "column";
+    ui.win.alignChildren = ["fill","top"];
+    ui.win.margins = 12;
+    ui.win.spacing = 8;
+
+    ui.title = ui.win.add("statictext", undefined, "Imported Character Style Debris Audit");
+    try { ui.title.graphics.font = ScriptUI.newFont(ui.title.graphics.font.name, "BOLD", 15); } catch (eFont) {}
+
+    ui.summary = ui.win.add("statictext", undefined, "", {multiline:true});
+    ui.summary.preferredSize = [1260, 130];
+
+    ui.capabilities = ui.win.add("edittext", undefined, "", {multiline:true, readonly:true, scrolling:true});
+    ui.capabilities.preferredSize = [1260, 165];
+
+    ui.list = ui.win.add("listbox", undefined, "", props);
+    ui.list.preferredSize = [1260, 390];
+    ui.list.onDoubleClick = locateFirstUse;
+
+    ui.status = ui.win.add("statictext", undefined, "");
+    ui.status.preferredSize = [1260, 34];
+
+    buttons = ui.win.add("group");
+    buttons.alignment = ["right","top"];
+
+    button = buttons.add("button", undefined, "Rescan");
+    button.onClick = scan;
+    button = buttons.add("button", undefined, "Record Assertion");
+    button.onClick = recordAssertion106;
+    button = buttons.add("button", undefined, "Locate First Use");
+    button.onClick = locateFirstUse;
+    button = buttons.add("button", undefined, "Save CSV");
+    button.onClick = saveCSV;
+    button = buttons.add("button", undefined, "Save Diagnostic");
+    button.onClick = saveDiagnostic106;
+    button = buttons.add("button", undefined, "Close");
+    button.onClick = function () { ui.win.close(); };
+}
+
+function refresh(doc) {
+    var i, row, item, rt = runtime106(), fixtureText;
+
+    ui.list.removeAll();
+    for (i = 0; i < rows.length; i++) {
+        row = rows[i];
+        item = ui.list.add("item", row.risk);
+        setSub(item,0,row.styleName);
+        setSub(item,1,row.formattingState);
+        setSub(item,2,row.directRuns);
+        setSub(item,3,row.storyRuns);
+        setSub(item,4,row.tableRuns);
+        setSub(item,5,row.nestedTableRuns);
+        setSub(item,6,row.footnoteRuns);
+        setSub(item,7,row.endnoteRuns);
+        setSub(item,8,row.oversetRuns);
+        setSub(item,9,row.dependencyCount);
+        setSub(item,10,row.pages || "-");
+    }
+
+    fixtureText = scanMeta.fixtureVersion !== "" ?
+        ("    Fixture: " + scanMeta.fixtureVersion + " schema " + scanMeta.fixtureSchema) :
+        "    Fixture: N/A";
+
+    ui.summary.text =
+        docName(doc) + "\n" +
+        "Runtime parity: " + rt.parity +
+        "    Loader: " + rt.loaderVersion +
+        "    Base: " + rt.baseVersion +
+        "    Patch: " + rt.patchVersion + fixtureText + "\n" +
+        "Character styles: " + counts.characterStyles +
+        "    Candidates: " + counts.candidateStyles +
+        "    Character Unnamed: " + counts.unnamedCharacterStyles +
+        "    Character Word Imported List: " + counts.wordListCharacterStyles +
+        "    Imported: " + counts.imported + "\n" +
+        "Paragraph styles: " + counts.paragraphStyles +
+        "    Paragraph Unnamed: " + counts.unnamedParagraphStyles +
+        "    Paragraph Word Imported List: " + counts.wordListParagraphStyles + "\n" +
+        "LOW: " + counts.low +
+        "    MEDIUM: " + counts.medium +
+        "    HIGH: " + counts.high +
+        "    REPLACE: " + counts.replace +
+        "    LOW Auth Schema: " + lowAuthSchema106() +
+        "    Authorized: " + (state106().lowAuthorization && state106().lowAuthorization.authorized ? "YES" : "NO") + "\n" +
+        "Usage warnings: " + counts.usageWarnings +
+        "    Dependency warnings: " + counts.dependencyWarnings +
+        "    Traversal block: " + (counts.traversalBlocksLow ? "YES" : "NO") +
+        "    Book scope: " + counts.bookScope;
+
+    ui.capabilities.text = capabilityPaletteText106(state106().traversalAudit);
+
+    try { ui.win.layout.layout(true); } catch (eLayout) {}
+}
+
+function refreshNoDocument() {
+    try { ui.list.removeAll(); } catch (e) {}
+    ui.summary.text = "No InDesign document is open.";
+    if (ui.capabilities) { ui.capabilities.text = ""; }
+    ui.status.text = "Open a document and click Rescan.";
+}
+
+function saveCSV() {
+    var doc, name, target, f, i, row;
+    if (app.documents.length === 0) {
+        alert("No InDesign document is open.");
+        return;
+    }
+    if (scanMeta === null || counts === null) {
+        alert("Run StyleFix before saving a CSV.");
+        return;
+    }
+
+    doc = app.activeDocument;
+    name = baseName(doc) + "_StyleFix_" + timestamp() + ".csv";
+    target = defaultFile(doc, name).saveDlg("Save StyleFix CSV", "CSV:*.csv");
+    if (target === null) { return; }
+    if (!/\.csv$/i.test(target.name)) { target = new File(target.fsName + ".csv"); }
+
+    f = new File(target.fsName);
+    f.encoding = "UTF-8";
+    f.lineFeed = "Windows";
+    if (!f.open("w")) {
+        alert("StyleFix could not open the selected file for writing.");
+        return;
+    }
+
+    f.write("\uFEFF");
+    writeProvenance(f);
+
+    f.writeln(csv([
+        "Risk","Family","Style Name","Style ID","Style Path","Imported","Based On",
+        "Formatting State","Semantic State",
+        "Direct Runs","Characters","Story Runs","Table Runs","Nested Table Runs",
+        "Footnote Runs","Endnote Runs","Overset Runs","Pages","Sample Text",
+        "Dependency Count","Dependencies","Export Map Count","Export Maps",
+        "Usage Warning Count","Usage Warnings",
+        "Dependency Warning Count","Dependency Warnings","Dependency N/A",
+        "Fingerprint Warning Count","Fingerprint Warnings",
+        "Canonical Match","Canonical Match Count","Delete After Replace Gate",
+        "Book Scope","Paragraph Unnamed Count","Paragraph Word Imported List Count",
+        "Suggested Action","Formatting Fingerprint"
+    ]));
+
+    for (i = 0; i < rows.length; i++) {
+        row = rows[i];
+        f.writeln(csv([
+            row.risk,row.family,row.styleName,row.styleId,row.stylePath,row.imported,row.basedOn,
+            row.formattingState,row.semanticState,
+            row.directRuns,row.characters,row.storyRuns,row.tableRuns,row.nestedTableRuns,
+            row.footnoteRuns,row.endnoteRuns,row.oversetRuns,row.pages,row.samples,
+            row.dependencyCount,row.dependencies,row.exportMapCount,row.exportMaps,
+            row.usageWarningCount,row.usageWarnings,
+            row.dependencyWarningCount,row.dependencyWarnings,row.dependencyNA,
+            row.fingerprintWarningCount,row.fingerprintWarnings,
+            row.canonicalMatch,row.matchCount,row.deleteAfterReplaceGate,
+            row.bookScope,row.paragraphUnnamedCount,row.paragraphWordListCount,
+            row.suggestedAction,row.fingerprint
+        ]));
+    }
+
+    f.close();
+    status("CSV saved: " + target.fsName);
+    alert("StyleFix CSV saved.\n\n" + target.fsName);
+}
+
+function writeProvenance(f) {
+    f.writeln(csv(["# StyleFix Provenance","Value"]));
+    f.writeln(csv(["# Script Version",VERSION]));
+    f.writeln(csv(["# Release Tag",RELEASE_TAG]));
+    f.writeln(csv(["# Loader Version",scanMeta.loaderVersion]));
+    f.writeln(csv(["# Base Module Version",scanMeta.baseVersion]));
+    f.writeln(csv(["# Patch Version",scanMeta.patchVersion]));
+    f.writeln(csv(["# Installed Artifact Parity",scanMeta.installedParity]));
+    f.writeln(csv(["# Installed Module Checks",scanMeta.moduleChecks]));
+    f.writeln(csv(["# Installed Script",scanMeta.installedFile]));
+    f.writeln(csv(["# Operating System",scanMeta.operatingSystem]));
+    f.writeln(csv(["# Run Timestamp",scanMeta.scanTimestamp]));
+    f.writeln(csv(["# Document Name",scanMeta.documentName]));
+    f.writeln(csv(["# Document File Modified",scanMeta.documentModified]));
+    f.writeln(csv(["# InDesign Version",scanMeta.indesignVersion]));
+    f.writeln(csv(["# InDesign Build",scanMeta.indesignBuild]));
+    f.writeln(csv(["# Fixture Version",scanMeta.fixtureVersion || "N/A"]));
+    f.writeln(csv(["# Fixture Schema",scanMeta.fixtureSchema || "N/A"]));
+    f.writeln(csv(["# Fixture ID",scanMeta.fixtureId || "N/A"]));
+    f.writeln(csv(["# Book Scope",scanMeta.bookScope]));
+    f.writeln(csv(["# Book Scope Method",scanMeta.bookMethod]));
+    f.writeln(csv(["# Candidate Families",FAMILY_TEXT]));
+    f.writeln(csv(["# Fingerprint Active Properties",scanMeta.fingerprintActive]));
+    f.writeln(csv(["# Fingerprint Dropped/Warnings",scanMeta.fingerprintWarnings]));
+    f.writeln(csv(["# Usage Scan Warnings",scanMeta.usageWarnings]));
+    f.writeln(csv(["# Dependency Scan Warnings",scanMeta.dependencyWarnings]));
+    f.writeln(csv(["# Dependency N/A",scanMeta.dependencyNA]));
+    f.writeln(csv(["# Traversal Capability Matrix",scanMeta.traversalCapabilitySummary]));
+    f.writeln(csv(["# Operator Usage Assertions",scanMeta.traversalAssertions || "NONE"]));
+    f.writeln(csv(["# LOW Authorization Schema",scanMeta.lowAuthorizationSchema]));
+    f.writeln(csv(["# LOW Authorization Chain",scanMeta.lowAuthorizationSummary]));
+    f.writeln(csv(["# Risk Counts",
+        "LOW=" + counts.low + "; MEDIUM=" + counts.medium +
+        "; HIGH=" + counts.high + "; REPLACE=" + counts.replace]));
+    f.writeln(csv(["# Candidate Counts",
+        "Character=" + counts.candidateStyles +
+        "; Paragraph Unnamed=" + counts.unnamedParagraphStyles +
+        "; Paragraph Word Imported List=" + counts.wordListParagraphStyles]));
+    f.writeln("");
+}
+
+function saveDiagnostic106() {
+    var doc, name, target, f, audit, i, item, rt;
+    if (app.documents.length === 0) {
+        alert("No InDesign document is open.");
+        return;
+    }
+    if (scanMeta === null || counts === null) {
+        alert("Run StyleFix before saving diagnostics.");
+        return;
+    }
+
+    doc = app.activeDocument;
+    name = baseName(doc) + "_StyleFix_Diagnostic_" + timestamp() + ".txt";
+    target = defaultFile(doc, name).saveDlg("Save StyleFix Diagnostic", "Text:*.txt");
+    if (target === null) { return; }
+    if (!/\.txt$/i.test(target.name)) { target = new File(target.fsName + ".txt"); }
+
+    f = new File(target.fsName);
+    f.encoding = "UTF-8";
+    f.lineFeed = "Windows";
+    if (!f.open("w")) {
+        alert("StyleFix could not open the diagnostic file for writing.");
+        return;
+    }
+
+    rt = runtime106();
+    audit = state106().traversalAudit;
+
+    f.writeln("StyleFix Diagnostic");
+    f.writeln("===================");
+    f.writeln("Script version: " + VERSION);
+    f.writeln("Loader version: " + rt.loaderVersion);
+    f.writeln("Base module version: " + rt.baseVersion);
+    f.writeln("Patch version: " + rt.patchVersion);
+    f.writeln("Installed parity: " + rt.parity);
+    f.writeln("Module checks: " + rt.moduleChecks);
+    f.writeln("Installed script: " + rt.installedFile);
+    f.writeln("OS: " + scanMeta.operatingSystem);
+    f.writeln("InDesign version: " + scanMeta.indesignVersion);
+    f.writeln("InDesign build: " + scanMeta.indesignBuild);
+    f.writeln("Document: " + scanMeta.documentName);
+    f.writeln("Fixture version: " + (scanMeta.fixtureVersion || "N/A"));
+    f.writeln("Fixture schema: " + (scanMeta.fixtureSchema || "N/A"));
+    f.writeln("Fixture ID: " + (scanMeta.fixtureId || "N/A"));
+    f.writeln("Book scope: " + scanMeta.bookScope);
+    f.writeln("Book scope method: " + scanMeta.bookMethod);
+    f.writeln("LOW authorization schema: " + scanMeta.lowAuthorizationSchema);
+    f.writeln("LOW authorization chain: " + scanMeta.lowAuthorizationSummary);
+    f.writeln("");
+
+    f.writeln("Traversal Capability Matrix");
+    f.writeln("---------------------------");
+    if (audit) {
+        for (i = 0; i < audit.items.length; i++) {
+            item = audit.items[i];
+            f.writeln(item.code + "\t" + item.state +
+                "\tinstances=" + item.instances +
+                "\tcritical=" + (item.critical ? "YES" : "NO") +
+                "\tasserted=" + (item.assertion !== null ? "YES" : "NO") +
+                (item.note ? "\t" + item.note : ""));
+        }
+    }
+    f.writeln("");
+
+    f.writeln("Operator assertions");
+    f.writeln("-------------------");
+    f.writeln(scanMeta.traversalAssertions || "NONE");
+    f.writeln("");
+
+    f.writeln("Warnings");
+    f.writeln("--------");
+    f.writeln("Usage: " + (scanMeta.usageWarnings || "NONE"));
+    f.writeln("Dependency: " + (scanMeta.dependencyWarnings || "NONE"));
+    f.writeln("Dependency N/A: " + (scanMeta.dependencyNA || "NONE"));
+    f.writeln("Fingerprint: " + (scanMeta.fingerprintWarnings || "NONE"));
+    f.writeln("");
+
+    f.writeln("Risk counts");
+    f.writeln("-----------");
+    f.writeln("LOW=" + counts.low + " MEDIUM=" + counts.medium +
+        " HIGH=" + counts.high + " REPLACE=" + counts.replace);
+
+    f.close();
+    status("Diagnostic saved: " + target.fsName);
+    alert("StyleFix diagnostic saved.\n\n" + target.fsName);
+}
+
+function safeOs106() {
+    try { return String($.os); } catch (e) { return ""; }
+}
