@@ -2,109 +2,131 @@
 
 StyleFix is an Adobe InDesign ExtendScript utility for auditing imported and automatically generated character-style debris before any styles are deleted or consolidated.
 
-## v1.0.2 scope
+## v1.0.3 scope
 
-StyleFix v1.0.2 is read-only. It expands the audit to the two imported-style families observed in the production document:
+StyleFix v1.0.3 remains read-only. It audits the two imported-style families observed in the production document:
 
 - `Unnamed Style *`
 - `Word Imported List Style*`
 
-For every candidate style, the audit records:
+No style, text, or document structure is changed in v1.0.3.
 
-- family, style name, and style ID;
-- whether InDesign reports the style as imported;
-- the style it is based on;
-- direct text-style-range usage count;
-- approximate number of characters carrying the style directly;
-- page locations and sample text for direct uses;
-- usage-scan warnings, including the Story ID and error when a story cannot be completely scanned;
-- known document dependencies and indirect references;
-- dependency-scan warnings, identifying the dependency check that failed;
-- whether the style contains substantive formatting or is an `EMPTY SHELL` whose audited formatting properties are all `NOTHING`;
-- candidate formatting equivalence to an existing canonical character style when substantive formatting exists;
-- conservative deletion risk;
-- suggested next action.
+## Peer-review hardening in v1.0.3
 
-No style, text, or document structure is changed in v1.0.2.
+v1.0.3 incorporates the correctness and reporting findings from peer review before remediation is allowed.
 
-## Diagnostic refinements in v1.0.2
+### Recursive direct-usage scanning
 
-The first production audit showed 84 `Unnamed Style *` entries with zero direct use and zero detected dependencies, but each row carried one undifferentiated audit warning. It also showed many `Word Imported List Style*` entries being offered as canonical matches because both style families appeared to contain no substantive formatting.
+Direct-use detection now walks:
 
-v1.0.2 makes four refinements:
+- ordinary story text;
+- table-cell text;
+- nested tables;
+- footnotes; and
+- endnotes when exposed by the installed InDesign DOM.
 
-1. **Usage and dependency warnings are separated.** The CSV now reports `Usage Warning Count`, `Usage Warnings`, `Dependency Warning Count`, and `Dependency Warnings` independently.
-2. **Warning sources are identified.** Usage warnings include the Story ID that could not be completely scanned. Dependency warnings name the failing dependency check and include the InDesign error when available.
-3. **Imported styles are excluded from canonical matching.** `Unnamed Style *`, `Word Imported List Style*`, any `Word Imported ...` style, and any style InDesign explicitly reports as imported cannot serve as canonical replacement targets.
-4. **Empty-shell styles do not participate in canonical matching.** If every audited character-formatting property is `NOTHING`, the style is classified as `EMPTY SHELL` and no equivalent canonical style is proposed.
+This closes the prior blind spot where a character style used only inside a table cell could appear unused.
+
+Page reporting now uses all parent text frames available for each discovered range before falling back to first/last insertion points.
+
+### One-pass dependency map
+
+Dependency sources are walked once per document and indexed by candidate character-style identity instead of being re-walked for every candidate.
+
+The dependency audit covers, where exposed by the installed DOM:
+
+- character-style `basedOn` relationships;
+- paragraph-style drop-cap, bullet, and numbering character styles;
+- nested styles;
+- nested GREP styles;
+- nested line styles;
+- text-variable character-style references using `appliedStyle`;
+- cross-reference formats and building blocks;
+- hyperlink and cross-reference text sources;
+- TOC page-number and separator styles;
+- footnote and endnote marker styles;
+- index options and index page-reference overrides; and
+- XML import/export style-map collections when the installed DOM exposes a recognizable character-style reference.
+
+Unsupported/version-specific dependency paths are reported as **N/A** rather than audit failures. A supported check that begins and then fails is still reported as a dependency warning.
+
+### Style identity
+
+Candidate matching now prefers:
+
+1. style ID;
+2. full InDesign specifier; then
+3. fully qualified style path.
+
+Leaf-name fallback is no longer used. This prevents two same-named character styles in different style groups from being cross-attributed.
+
+### Fingerprint schema validation
+
+The fingerprint property list is probed against real character styles at scan start. Properties that cannot be read are removed from the active fingerprint and reported as fingerprint warnings.
+
+The language property is `appliedLanguage`. `otfFigureStyle` is also included only when the installed DOM confirms it is readable.
+
+A style whose active audited properties are all `NOTHING` remains classified as `EMPTY SHELL` and does not participate in canonical replacement matching.
+
+### Global evidence and risk
+
+A global usage-scan or dependency-scan failure still blocks an otherwise unused style from receiving `LOW`, because document-wide deletion safety has not been established.
+
+A global usage warning no longer automatically suppresses `REPLACE` for a style with confirmed use or dependency. Replacement classification still requires exactly one canonical fingerprint match and a clean fingerprint schema.
+
+### Book scope
+
+StyleFix checks open InDesign books. If the active document is identified as a member of an open `.indb`, or book membership cannot be established safely, document-only evidence cannot receive `LOW`.
+
+This prevents a style from being called safe merely because it is unused in one chapter while another open book chapter may still use it.
+
+### Palette and CSV
+
+v1.0.3 adds:
+
+- a multi-column list with headers;
+- `multiselect: true` in preparation for the remediation release;
+- LOW-first sorting for the future deletion workflow;
+- UTF-8 BOM in CSV output for Excel on Windows;
+- separate usage warnings, dependency warnings, dependency N/A notes, fingerprint warnings, and book scope;
+- point-based scan measurement settings, restored after the scan; and
+- document-state guards so **Rescan**, **Locate First Use**, and **Save CSV** do not fail after the active document is closed.
 
 ## Risk model
 
 | Risk | Meaning |
 | --- | --- |
-| `LOW` | No direct text usage, no known dependency, and no usage or dependency scan warning. Candidate for guarded deletion in a later version. |
-| `MEDIUM` | No confirmed use or dependency, but one or more audit checks were incomplete. Review the named warning before deletion. |
-| `HIGH` | The style is directly applied to text or referenced by another document construct, or a used/referenced style has incomplete audit coverage. |
-| `REPLACE` | The style is used or referenced and exactly one non-imported, substantive canonical character style has the same audited formatting fingerprint. Candidate for replacement followed by deletion after field validation. |
+| `LOW` | No direct text usage, no known dependency, usage/dependency scans completed, and book scope does not block document-only safety. Candidate for guarded deletion in a later version. |
+| `MEDIUM` | No confirmed use or dependency, but usage/dependency evidence is incomplete or open-book scope prevents a document-only LOW result. |
+| `HIGH` | The style is directly used or referenced and does not have one clean canonical replacement match. |
+| `REPLACE` | The style is directly used or referenced and exactly one non-imported, substantive canonical character style has the same validated formatting fingerprint. Diagnostic only in v1.0.3. |
 
-`LOW` deliberately means more than unused. StyleFix requires zero direct use, zero known dependencies, and complete audit coverage.
+`LOW` means more than unused. It requires zero direct use, zero known dependencies, complete supported audit coverage, and acceptable document/book scope.
 
-## Dependency coverage
+## Recommended tool order
 
-v1.0.2 checks common InDesign character-style reference paths, including:
+For the current InDesign QA toolset, the preferred production order is:
 
-- other character styles using the candidate through `basedOn`;
-- paragraph-style drop caps;
-- paragraph-style bullets and numbering;
-- nested styles;
-- nested GREP styles;
-- nested line styles;
-- character-style running-header text variables;
-- cross-reference formats and cross-reference building blocks;
-- hyperlink text sources;
-- cross-reference text sources;
-- TOC page-number and separator styles;
-- index-generation character styles;
-- index page-number style overrides.
+1. **DocStats** for broad document inventory and discrepancy discovery.
+2. **HeaderFix** for the fixed section markers.
+3. **NormalFix** for body-text paragraph cleanup and `CLI Code Red Body` conversion.
+4. **TableFix** for table semantics, table paragraph styles, and `CLI Code Red Table` preservation.
+5. **StyleFix** for imported-style debris audit and, in a future remediation release, consolidation/deletion.
+6. **DocStats** again for final validation before export.
 
-Any failed check is reported by name instead of being collapsed into one generic warning count.
-
-## Canonical-style matching
-
-Canonical replacement candidates must now be:
-
-- named character styles outside the two debris families;
-- not named `Word Imported ...`;
-- not explicitly reported by InDesign as imported; and
-- substantively formatted.
-
-StyleFix compares substantive candidates using key character attributes such as font, font style, point size, leading, tracking, position, scaling, baseline shift, fill/stroke, and related character settings.
-
-A canonical match remains diagnostic evidence only. v1.0.2 performs no replacement.
-
-## UI
-
-The palette provides:
-
-- **Rescan**
-- **Locate First Use**
-- double-click to locate the first direct use
-- **Save CSV**
-- **Close**
-
-Rows remain single-select in the audit release. Multi-select is reserved for the remediation phase.
+NormalFix and TableFix should establish the canonical red CLI character styles before any future StyleFix replacement operation. This keeps StyleFix from consolidating imported red styles before the position-aware NormalFix/TableFix passes have completed.
 
 ## Planned remediation
 
-After the refined production audit establishes deletion safety, the remediation release will use the same multi-select pattern as the other InDesign QA utilities:
+After v1.0.3 passes production validation, the remediation release will use the multi-select pattern already established in the other InDesign QA tools:
 
 - Ctrl-click and Shift-click selection;
 - **Delete Selected Safe Styles** for re-verified LOW-risk candidates;
 - **Replace Selected With Canonical Style** for explicitly mapped candidates;
-- immediate re-check of usage and dependencies before every mutation;
+- immediate usage/dependency/book-scope re-check before every mutation;
 - zero-reference verification before deletion;
 - automatic rescan and Corrected / Skipped / Could not verify reporting;
-- no unrestricted Delete All operation.
+- no unrestricted Delete All action.
 
 ## Compatibility
 
