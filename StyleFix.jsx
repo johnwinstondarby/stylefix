@@ -1,9 +1,9 @@
 #target "InDesign"
 #targetengine "StyleFix"
 
-/* StyleFix v1.0.4 loader. Keep the src folder beside this file. */
+/* StyleFix v1.0.5 loader. Keep the src folder beside this file. */
 (function () {
-    var VERSION = "1.0.4";
+    var VERSION = "1.0.5";
     var base = File($.fileName).parent;
     var names = [
         "src/StyleFix.part01.jsxinc",
