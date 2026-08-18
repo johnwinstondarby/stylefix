@@ -1,0 +1,121 @@
+        try { return objectTypeName(obj) + ":ID:" + String(obj.id); } catch (eId) {}
+        return "";
+    }
+
+    function valid(obj) {
+        try { return obj !== null && obj !== undefined && obj.isValid === true; }
+        catch (e) { return false; }
+    }
+
+    function addGlobalAuditError(audit, label, err) {
+        var detail = label;
+        var summary = errorSummary(err);
+        audit.errors++;
+        if (summary.length > 0) { detail += ": " + summary; }
+        if (audit.errorDetails.length < 60 && !containsString(audit.errorDetails, detail)) {
+            audit.errorDetails.push(detail);
+        }
+    }
+
+    function addNA(audit, detail) {
+        if (audit.na.length < 60 && !containsString(audit.na, detail)) { audit.na.push(detail); }
+    }
+
+    function errorSummary(err) {
+        var parts = [];
+        if (err === null || err === undefined) { return "unsupported or unreadable property"; }
+        try { if (err.message) { parts.push(String(err.message)); } } catch (eM) {}
+        try { if (err.number !== undefined) { parts.push("Error " + String(err.number)); } } catch (eN) {}
+        try { if (err.line !== undefined) { parts.push("line " + String(err.line)); } } catch (eL) {}
+        return parts.join(" | ");
+    }
+
+    function previewText(value) {
+        var s = String(value).replace(/\u00A0/g," ");
+        s = s.replace(/[\r\n\t]+/g," ");
+        s = s.replace(/  +/g," ");
+        s = s.replace(/^ +/,"").replace(/ +$/,"");
+        if (s.length > 140) { s = s.substring(0,137) + "..."; }
+        return s;
+    }
+
+    function safeContents(obj) {
+        try { return obj.contents; } catch (e) { return ""; }
+    }
+
+    function containsString(arr, value) {
+        var i;
+        for (i = 0; i < arr.length; i++) {
+            if (String(arr[i]) === String(value)) { return true; }
+        }
+        return false;
+    }
+
+    function naturalStyleCompare(a,b) {
+        var ma = String(a).match(/^(.*?)(\d+)$/);
+        var mb = String(b).match(/^(.*?)(\d+)$/);
+        if (ma && mb && ma[1] === mb[1]) { return Number(ma[2]) - Number(mb[2]); }
+        a = String(a).toLowerCase();
+        b = String(b).toLowerCase();
+        if (a < b) { return -1; }
+        if (a > b) { return 1; }
+        return 0;
+    }
+
+    function filePathKey(fileObj) {
+        var s;
+        if (fileObj === null || fileObj === undefined) { return ""; }
+        try { s = String(fileObj.fsName); }
+        catch (eFs) { try { s = String(fileObj); } catch (eString) { return ""; } }
+        return s.replace(/\\/g,"/").toLowerCase();
+    }
+
+    function fileModifiedText(doc) {
+        var file;
+        try {
+            if (!doc.saved) { return "Unsaved"; }
+            file = doc.fullName;
+            if (file && file.modified) { return String(file.modified); }
+        } catch (e) {}
+        return "";
+    }
+
+    function csv(values) {
+        var out = [], i, s;
+        for (i = 0; i < values.length; i++) {
+            s = String(values[i]).replace(/"/g,'""');
+            out.push('"' + s + '"');
+        }
+        return out.join(",");
+    }
+
+    function defaultFile(doc,name) {
+        var folder = Folder.desktop;
+        try {
+            if (doc.saved && doc.filePath && doc.filePath.exists) { folder = doc.filePath; }
+        } catch (e) {}
+        return new File(folder.fsName + "/" + name);
+    }
+
+    function docName(doc) {
+        try { return String(doc.name); } catch (e) { return "Active document"; }
+    }
+
+    function baseName(doc) {
+        return docName(doc).replace(/\.indd$/i,"").replace(/[\\\/:*?"<>|]/g,"_");
+    }
+
+    function timestamp() {
+        var d = new Date();
+        return d.getFullYear() + two(d.getMonth()+1) + two(d.getDate()) + "-" +
+            two(d.getHours()) + two(d.getMinutes()) + two(d.getSeconds());
+    }
+
+    function two(n) { return n < 10 ? "0" + n : String(n); }
+
+    function status(text) {
+        if (!ui.status) { return; }
+        ui.status.text = text;
+        try { ui.win.update(); } catch (e) {}
+    }
+}());

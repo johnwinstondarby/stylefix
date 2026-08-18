@@ -1,0 +1,180 @@
+    }
+
+    function suggestedAction(risk, matches, deps, substantive, deletionGate) {
+        if (risk === "LOW") {
+            return substantive ?
+                "Safe deletion candidate after selected re-check" :
+                "EMPTY SHELL formatting; safe deletion candidate after selected re-check";
+        }
+        if (risk === "MEDIUM") {
+            return substantive ?
+                "Review scan/book-scope warnings before deletion" :
+                "EMPTY SHELL formatting; review scan/book-scope warnings before deletion";
+        }
+        if (risk === "REPLACE") {
+            return "Candidate replacement with " + styleName(matches[0]) +
+                "; delete gate: " + deletionGate;
+        }
+        if (deps.exportMapCount > 0) {
+            return "Preserve/review EPUB export mapping before any deletion";
+        }
+        if (deps.count > 0) { return "Resolve dependencies before deletion"; }
+        return "Review applied text before deletion";
+    }
+
+    /* ---------- Book scope ---------- */
+
+    function bookScopeState(doc) {
+        var result = {
+            blocksLow:false,
+            label:"Standalone/No book evidence",
+            method:"No open book matched; no nearby .indb found"
+        };
+        var books, i, j, contents, docPath, contentPath, nearby;
+        docPath = filePathKey(safePropertyObject(doc, "fullName"));
+
+        try { books = collectionElements(app.books); } catch (eBooks) { books = []; }
+
+        for (i = 0; i < books.length; i++) {
+            if (!valid(books[i])) { continue; }
+            try {
+                contents = collectionElements(books[i].bookContents);
+                for (j = 0; j < contents.length; j++) {
+                    contentPath = filePathKey(safePropertyObject(contents[j], "fullName"));
+                    if (docPath !== "" && contentPath !== "" && docPath === contentPath) {
+                        result.blocksLow = true;
+                        result.label = "OPEN BOOK MEMBER: " + safeProperty(books[i], "name", "book");
+                        result.method = "Matched active document path to an open book content entry";
+                        return result;
+                    }
+                }
+            } catch (eContent) {
+                result.blocksLow = true;
+                result.label = "OPEN BOOK SCOPE UNCERTAIN";
+                result.method = "An open book could not be enumerated completely";
+                return result;
+            }
+        }
+
+        nearby = nearbyIndbFiles(doc);
+        if (books.length === 0 && nearby.length > 0) {
+            result.blocksLow = true;
+            result.label = "POTENTIAL BOOK SCOPE: " + nearby.join(" | ") + " (not open)";
+            result.method = "Nearby .indb file(s) found in document folder; membership cannot be verified while closed";
+            return result;
+        }
+
+        if (books.length > 0) {
+            result.label = "Standalone/No open-book match";
+            result.method = "Open book contents scanned; active document path did not match";
+        }
+        return result;
+    }
+
+    function nearbyIndbFiles(doc) {
+        var out = [], files, i;
+        try {
+            if (!doc.saved || !doc.filePath || !doc.filePath.exists) { return out; }
+            files = doc.filePath.getFiles(function (f) {
+                return f instanceof File && /\.indb$/i.test(f.name);
+            });
+            for (i = 0; i < files.length && i < 10; i++) { out.push(files[i].name); }
+        } catch (e) {}
+        return out;
+    }
+
+    /* ---------- Candidate identity ---------- */
+
+    function isAuditCandidate(style) {
+        var name = styleName(style);
+        return UNNAMED_RE.test(name) || WORD_LIST_RE.test(name);
+    }
+
+    function candidateFamily(style) {
+        var name = styleName(style);
+        if (UNNAMED_RE.test(name)) { return "Unnamed Style"; }
+        if (WORD_LIST_RE.test(name)) { return "Word Imported List Style"; }
+        return "Other";
+    }
+
+    function isCanonicalCandidate(style) {
+        var name = styleName(style);
+        if (name === "" || name === "[None]") { return false; }
+        if (isAuditCandidate(style)) { return false; }
+        if (/^Word Imported /i.test(name)) { return false; }
+        if (importedState(style) === "Yes") { return false; }
+        if (!hasSubstantiveFormatting(style)) { return false; }
+        return true;
+    }
+
+    function buildCandidateLookup(candidates) {
+        var lookup = {byId:{}, bySpecifier:{}, byPath:{}};
+        var i, id, spec, path, key;
+        for (i = 0; i < candidates.length; i++) {
+            if (!valid(candidates[i])) { continue; }
+            key = styleKey(candidates[i]);
+            id = styleIdText(candidates[i]);
+            spec = styleSpecifier(candidates[i]);
+            path = styleQualifiedPath(candidates[i]);
+            if (id !== "") { lookup.byId[id] = key; }
+            if (spec !== "") { lookup.bySpecifier[spec] = key; }
+            if (path !== "") { lookup.byPath[path] = key; }
+        }
+        return lookup;
+    }
+
+    function candidateKeyForRef(ref, lookup) {
+        var id, spec, path;
+        if (ref === null || ref === undefined) { return ""; }
+        id = styleIdText(ref);
+        if (id !== "" && lookup.byId[id] !== undefined) { return lookup.byId[id]; }
+        spec = styleSpecifier(ref);
+        if (spec !== "" && lookup.bySpecifier[spec] !== undefined) { return lookup.bySpecifier[spec]; }
+        path = styleQualifiedPath(ref);
+        if (path !== "" && lookup.byPath[path] !== undefined) { return lookup.byPath[path]; }
+        return "";
+    }
+
+    function sameStyle(a, b) {
+        var aid, bid, aspec, bspec, apath, bpath;
+        if (a === null || b === null || a === undefined || b === undefined) { return false; }
+        aid = styleIdText(a); bid = styleIdText(b);
+        if (aid !== "" && bid !== "") { return aid === bid; }
+        aspec = styleSpecifier(a); bspec = styleSpecifier(b);
+        if (aspec !== "" && bspec !== "") { return aspec === bspec; }
+        apath = styleQualifiedPath(a); bpath = styleQualifiedPath(b);
+        return apath !== "" && apath === bpath;
+    }
+
+    function styleKey(style) {
+        var id = styleIdText(style);
+        var spec;
+        if (id !== "") { return "ID:" + id; }
+        spec = styleSpecifier(style);
+        if (spec !== "") { return "SPEC:" + spec; }
+        return "PATH:" + styleQualifiedPath(style);
+    }
+
+    function styleIdText(style) {
+        try {
+            if (style.id !== undefined && style.id !== null) { return String(style.id); }
+        } catch (e) {}
+        return "";
+    }
+
+    function styleSpecifier(style) {
+        try { return String(style.toSpecifier()); } catch (e) { return ""; }
+    }
+
+    function styleQualifiedPath(style) {
+        var parts = [], node = style, depth = 0, name, typeName;
+        while (node !== null && node !== undefined && depth < 12) {
+            name = safeName(node);
+            typeName = objectTypeName(node);
+            if (name !== "") { parts.unshift(typeName + ":" + name); }
+            if (typeName === "Document" || typeName === "Application") { break; }
+            try { node = node.parent; } catch (eParent) { break; }
+            depth++;
+        }
+        return parts.join("/");
+    }

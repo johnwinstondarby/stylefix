@@ -1,0 +1,180 @@
+
+    /* ---------- UI / CSV ---------- */
+
+    function buildUI() {
+        var buttons, button;
+        var props = {
+            multiselect:true,
+            numberOfColumns:12,
+            showHeaders:true,
+            columnTitles:["Risk","Style","Format","Runs","Story","Table","Nested","Foot","End","Over","Deps","Pages"],
+            columnWidths:[60,210,95,55,55,55,55,55,55,55,55,180]
+        };
+
+        ui.win = new Window("palette", "StyleFix v" + VERSION);
+        ui.win.orientation = "column";
+        ui.win.alignChildren = ["fill","top"];
+        ui.win.margins = 12;
+        ui.win.spacing = 8;
+
+        ui.title = ui.win.add("statictext", undefined, "Imported Character Style Debris Audit");
+        try { ui.title.graphics.font = ScriptUI.newFont(ui.title.graphics.font.name, "BOLD", 15); } catch (eFont) {}
+
+        ui.summary = ui.win.add("statictext", undefined, "", {multiline:true});
+        ui.summary.preferredSize = [1260, 130];
+
+        ui.list = ui.win.add("listbox", undefined, "", props);
+        ui.list.preferredSize = [1260, 460];
+        ui.list.onDoubleClick = locateFirstUse;
+
+        ui.status = ui.win.add("statictext", undefined, "");
+        ui.status.preferredSize = [1260, 34];
+
+        buttons = ui.win.add("group");
+        buttons.alignment = ["right","top"];
+
+        button = buttons.add("button", undefined, "Rescan");
+        button.onClick = scan;
+        button = buttons.add("button", undefined, "Locate First Use");
+        button.onClick = locateFirstUse;
+        button = buttons.add("button", undefined, "Save CSV");
+        button.onClick = saveCSV;
+        button = buttons.add("button", undefined, "Close");
+        button.onClick = function () { ui.win.close(); };
+    }
+
+    function refresh(doc) {
+        var i, row, item;
+        ui.list.removeAll();
+
+        for (i = 0; i < rows.length; i++) {
+            row = rows[i];
+            item = ui.list.add("item", row.risk);
+            setSub(item,0,row.styleName);
+            setSub(item,1,row.formattingState);
+            setSub(item,2,row.directRuns);
+            setSub(item,3,row.storyRuns);
+            setSub(item,4,row.tableRuns);
+            setSub(item,5,row.nestedTableRuns);
+            setSub(item,6,row.footnoteRuns);
+            setSub(item,7,row.endnoteRuns);
+            setSub(item,8,row.oversetRuns);
+            setSub(item,9,row.dependencyCount);
+            setSub(item,10,row.pages || "-");
+        }
+
+        ui.summary.text =
+            docName(doc) + "\n" +
+            "Character styles: " + counts.characterStyles +
+            "    Candidates: " + counts.candidateStyles +
+            "    Character Unnamed: " + counts.unnamedCharacterStyles +
+            "    Character Word Imported List: " + counts.wordListCharacterStyles +
+            "    Imported: " + counts.imported + "\n" +
+            "Paragraph styles: " + counts.paragraphStyles +
+            "    Paragraph Unnamed: " + counts.unnamedParagraphStyles +
+            "    Paragraph Word Imported List: " + counts.wordListParagraphStyles + "\n" +
+            "Used: " + counts.directlyUsed +
+            "    Referenced: " + counts.referenced +
+            "    Export-mapped: " + counts.exportMapped +
+            "    Usage warnings: " + counts.usageWarnings +
+            "    Dependency warnings: " + counts.dependencyWarnings +
+            "    N/A: " + counts.dependencyNA + "\n" +
+            "LOW: " + counts.low +
+            "    MEDIUM: " + counts.medium +
+            "    HIGH: " + counts.high +
+            "    REPLACE: " + counts.replace +
+            "    Book scope: " + counts.bookScope;
+
+        try { ui.win.layout.layout(true); } catch (eLayout) {}
+    }
+
+    function setSub(item, index, value) {
+        try { item.subItems[index].text = String(value); } catch (e) {}
+    }
+
+    function refreshNoDocument() {
+        try { ui.list.removeAll(); } catch (e) {}
+        ui.summary.text = "No InDesign document is open.";
+        ui.status.text = "Open a document and click Rescan.";
+    }
+
+    function locateFirstUse() {
+        var selection, index, row, text, located = false;
+        if (app.documents.length === 0) {
+            alert("No InDesign document is open.");
+            return;
+        }
+        selection = ui.list.selection;
+        if (selection === null) {
+            alert("Select a StyleFix row first.");
+            return;
+        }
+        if (selection.constructor === Array) { index = selection[0].index; }
+        else { index = selection.index; }
+
+        row = rows[index];
+        if (!row || row.firstUsage === null || !valid(row.firstUsage)) {
+            alert("This style has no direct text usage to locate.\n\n" +
+                "Risk: " + (row ? row.risk : "?") +
+                (row && row.dependencies ? "\nDependencies: " + row.dependencies : ""));
+            return;
+        }
+
+        text = row.firstUsage;
+        try {
+            if (row.firstPageRef !== null && valid(row.firstPageRef)) {
+                app.activeWindow.activePage = row.firstPageRef;
+            }
+        } catch (ePage) {}
+        try { text.showText(); located = true; } catch (eShow) {}
+        try { app.select(text); located = true; } catch (eSelect) {
+            try { app.select(text.insertionPoints.item(0)); located = true; } catch (eIP) {}
+        }
+
+        if (located) { status("Located first direct use of " + row.styleName + "."); }
+        else { alert("InDesign could not navigate to the recorded first use of " + row.styleName + "."); }
+    }
+
+    function saveCSV() {
+        var doc, name, target, f, i, row;
+        if (app.documents.length === 0) {
+            alert("No InDesign document is open.");
+            return;
+        }
+        if (scanMeta === null || counts === null) {
+            alert("Run StyleFix before saving a CSV.");
+            return;
+        }
+
+        doc = app.activeDocument;
+        name = baseName(doc) + "_StyleFix_" + timestamp() + ".csv";
+        target = defaultFile(doc, name).saveDlg("Save StyleFix CSV", "CSV:*.csv");
+        if (target === null) { return; }
+        if (!/\.csv$/i.test(target.name)) { target = new File(target.fsName + ".csv"); }
+
+        f = new File(target.fsName);
+        f.encoding = "UTF-8";
+        f.lineFeed = "Windows";
+        if (!f.open("w")) {
+            alert("StyleFix could not open the selected file for writing.");
+            return;
+        }
+
+        f.write("\uFEFF");
+        writeProvenance(f);
+
+        f.writeln(csv([
+            "Risk","Family","Style Name","Style ID","Style Path","Imported","Based On",
+            "Formatting State","Semantic State",
+            "Direct Runs","Characters","Story Runs","Table Runs","Nested Table Runs",
+            "Footnote Runs","Endnote Runs","Overset Runs","Pages","Sample Text",
+            "Dependency Count","Dependencies","Export Map Count","Export Maps",
+            "Usage Warning Count","Usage Warnings",
+            "Dependency Warning Count","Dependency Warnings","Dependency N/A",
+            "Fingerprint Warning Count","Fingerprint Warnings",
+            "Canonical Match","Canonical Match Count","Delete After Replace Gate",
+            "Book Scope","Paragraph Unnamed Count","Paragraph Word Imported List Count",
+            "Suggested Action","Formatting Fingerprint"
+        ]));
+
+        for (i = 0; i < rows.length; i++) {

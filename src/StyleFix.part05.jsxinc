@@ -1,0 +1,180 @@
+    function recordNamedSourceCollection(audit, collection, label) {
+        var elements = collectionElements(collection);
+        var i;
+        for (i = 0; i < elements.length; i++) {
+            recordPropertyDependency(audit, elements[i], "appliedCharacterStyle",
+                label + ": " + safeProperty(elements[i], "name", "#" + i));
+        }
+    }
+
+    function scanXmlMapCollection(audit, doc, prop, label) {
+        var collection, elements, i;
+        if (!propertyReadable(doc, prop)) {
+            addNA(audit, label + " collection unavailable");
+            return;
+        }
+        try {
+            collection = safePropertyObject(doc, prop);
+            elements = collectionElements(collection);
+            for (i = 0; i < elements.length; i++) {
+                recordPropertyDependency(audit, elements[i], "mappedStyle", label + " #" + i);
+            }
+        } catch (eXml) {
+            addGlobalAuditError(audit, label, eXml);
+        }
+    }
+
+    function scanStyleExportTagMaps(audit, candidates) {
+        var i, j, style, key, item, maps, detail;
+        if (candidates.length === 0) { return; }
+
+        if (!propertyReadable(candidates[0], "styleExportTagMaps")) {
+            addGlobalAuditError(audit, "CharacterStyle.styleExportTagMaps", null);
+            return;
+        }
+
+        for (i = 0; i < candidates.length; i++) {
+            style = candidates[i];
+            key = styleKey(style);
+            item = audit.map[key];
+            if (item === undefined) { continue; }
+
+            try {
+                maps = collectionElements(style.styleExportTagMaps);
+                for (j = 0; j < maps.length; j++) {
+                    if (!valid(maps[j])) { continue; }
+                    detail = exportMapDetail(maps[j], j);
+                    item.exportMapCount++;
+                    if (item.exportDetails.length < 20) { item.exportDetails.push(detail); }
+                    addDependencyByKey(audit, key, "Style export tag map: " + detail);
+                }
+            } catch (eMaps) {
+                addGlobalAuditError(audit, "Style export tag maps for " + styleQualifiedPath(style), eMaps);
+            }
+        }
+    }
+
+    function exportMapDetail(map, index) {
+        var parts = [], value;
+        value = readableValue(map, "exportType"); if (value !== "") { parts.push("type=" + value); }
+        value = readableValue(map, "exportTag"); if (value !== "") { parts.push("tag=" + value); }
+        value = readableValue(map, "exportClass"); if (value !== "") { parts.push("class=" + value); }
+        value = readableValue(map, "exportAttributes"); if (value !== "") { parts.push("attrs=" + value); }
+        return parts.length > 0 ? parts.join("; ") : "map #" + index;
+    }
+
+    /* ---------- Fingerprints / risk ---------- */
+
+    function fingerprintPropertyCandidates() {
+        return [
+            "appliedFont","fontStyle","pointSize","leading","tracking",
+            "appliedLanguage","capitalization","position","underline","strikeThru",
+            "noBreak","horizontalScale","verticalScale","baselineShift","skew",
+            "ligatures","otfFigureStyle","fillColor","fillTint","strokeColor",
+            "strokeTint","strokeWeight","overprintFill","overprintStroke"
+        ];
+    }
+
+    function validateFingerprintProperties(styles) {
+        var requested = fingerprintPropertyCandidates();
+        var active = [], warnings = [];
+        var i, j, readable;
+
+        for (i = 0; i < requested.length; i++) {
+            readable = false;
+            for (j = 0; j < styles.length; j++) {
+                if (valid(styles[j]) && propertyReadable(styles[j], requested[i])) {
+                    readable = true;
+                    break;
+                }
+            }
+            if (readable) { active.push(requested[i]); }
+            else { warnings.push("Fingerprint property unavailable: " + requested[i]); }
+        }
+        return {active:active, warnings:warnings};
+    }
+
+    function formattingFingerprint(style) {
+        var parts = [], i;
+        if (!valid(style)) { return ""; }
+        for (i = 0; i < fingerprintProps.length; i++) {
+            parts.push(fingerprintProps[i] + "=" + normalizedProperty(style, fingerprintProps[i]));
+        }
+        return parts.join(";");
+    }
+
+    function hasSubstantiveFormatting(style) {
+        var i, value;
+        if (!valid(style)) { return false; }
+        for (i = 0; i < fingerprintProps.length; i++) {
+            try { value = style[fingerprintProps[i]]; } catch (e) { continue; }
+            if (!isNothingValue(value)) { return true; }
+        }
+        return false;
+    }
+
+    function equivalentCanonicalStyles(target, canonical) {
+        var matches = [], fp, i;
+        if (!hasSubstantiveFormatting(target)) { return matches; }
+        fp = formattingFingerprint(target);
+        if (fp === "") { return matches; }
+
+        for (i = 0; i < canonical.length; i++) {
+            if (!valid(canonical[i]) || sameStyle(canonical[i], target)) { continue; }
+            if (!hasSubstantiveFormatting(canonical[i])) { continue; }
+            if (formattingFingerprint(canonical[i]) === fp) { matches.push(canonical[i]); }
+        }
+        return matches;
+    }
+
+    function normalizedProperty(obj, prop) {
+        var value;
+        try { value = obj[prop]; } catch (e) { return "<unavailable>"; }
+        if (value === null || value === undefined) { return "<null>"; }
+        if (isNothingValue(value)) { return "NOTHING"; }
+
+        if (prop === "appliedFont") {
+            try { if (value.fullName !== undefined) { return String(value.fullName); } } catch (eFull) {}
+            try { if (value.name !== undefined) { return String(value.name); } } catch (eName) {}
+        }
+        if (prop === "appliedLanguage" || prop === "fillColor" || prop === "strokeColor") {
+            return styleRefName(value);
+        }
+        try { if (value.constructor === Array) { return value.join("/"); } } catch (eArray) {}
+        try { return String(value); } catch (eString) { return "<unprintable>"; }
+    }
+
+    function isNothingValue(value) {
+        var s;
+        if (value === null || value === undefined) { return true; }
+        try {
+            if (NothingEnum !== undefined && value === NothingEnum.NOTHING) { return true; }
+        } catch (eEnum) {}
+        try { s = String(value).toLowerCase().replace(/\s+/g, ""); }
+        catch (eString) { return false; }
+        return s === "" || s === "nothing" || s === "<null>" ||
+            s === "<unavailable>" || s.indexOf("nothingenum") >= 0;
+    }
+
+    function classifyRisk(usage, deps, matches, usageErrors, depErrors, fingerprintWarnings, bookBlocksLow) {
+        if (deps.count > 0) { return "HIGH"; }
+
+        if (usage.runs > 0) {
+            if (matches.length === 1 && fingerprintWarnings === 0) { return "REPLACE"; }
+            return "HIGH";
+        }
+
+        if (usageErrors > 0 || depErrors > 0 || bookBlocksLow) { return "MEDIUM"; }
+        return "LOW";
+    }
+
+    function deleteAfterReplaceGate(risk, usageErrors, depErrors, fpWarnings, bookBlocksLow, deps) {
+        var reasons = [];
+        if (risk !== "REPLACE") { return "N/A"; }
+        if (usageErrors > 0) { reasons.push("usage scan incomplete"); }
+        if (depErrors > 0) { reasons.push("dependency scan incomplete"); }
+        if (fpWarnings > 0) { reasons.push("fingerprint schema incomplete"); }
+        if (bookBlocksLow) { reasons.push("book scope unresolved"); }
+        if (deps.count > 0) { reasons.push("dependencies remain"); }
+        if (reasons.length > 0) { return "BLOCKED: " + reasons.join("; "); }
+        return "ELIGIBLE ONLY AFTER VERIFIED REPLACEMENT + ZERO-REFERENCE RESCAN";

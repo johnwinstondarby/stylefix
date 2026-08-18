@@ -1,0 +1,180 @@
+
+/*
+StyleFix v1.0.4
+Read-only imported-style debris audit.
+
+v1.0.4 is hardened for the repository canary gate:
+- recursive direct-use scan: stories, table cells, nested tables, footnotes, endnotes;
+- page/overset reporting across unusual story locations;
+- one-pass dependency indexing;
+- EPUB/HTML style export-tag-map inspection;
+- paragraph-style census for candidate name families;
+- validated character-style fingerprint matching;
+- conservative book-scope gate;
+- provenance header in every CSV;
+- multi-column, multi-select audit UI in preparation for remediation.
+
+No style, text, or document structure is changed.
+ExtendScript / ECMAScript 3 compatible.
+*/
+
+(function () {
+    var VERSION = "1.0.4";
+    var RELEASE_TAG = "v1.0.4";
+    var UNNAMED_RE = /^Unnamed Style(?:\s|$)/i;
+    var WORD_LIST_RE = /^Word Imported List Style/i;
+    var FAMILY_TEXT = "Unnamed Style * | Word Imported List Style*";
+
+    var rows = [];
+    var counts = null;
+    var scanMeta = null;
+    var ui = {};
+    var fingerprintProps = [];
+
+    if (app.documents.length === 0) {
+        alert("StyleFix v" + VERSION + "\n\nOpen an InDesign document before running StyleFix.");
+        return;
+    }
+
+    buildUI();
+    scan();
+    ui.win.show();
+
+    function scan() {
+        var doc, allChar, allPara, candidates, canonical;
+        var usageAudit, depAudit, schemaAudit, bookAudit, census;
+        var oldUnit = null;
+        var i, style, usage, deps, matches, risk, deletionGate, substantive, family;
+
+        if (app.documents.length === 0) {
+            rows = [];
+            refreshNoDocument();
+            alert("StyleFix v" + VERSION + "\n\nNo InDesign document is open.");
+            return;
+        }
+
+        doc = app.activeDocument;
+        rows = [];
+        counts = newCounts();
+        scanMeta = newScanMeta(doc);
+
+        try {
+            oldUnit = app.scriptPreferences.measurementUnit;
+            app.scriptPreferences.measurementUnit = MeasurementUnits.POINTS;
+        } catch (eUnit) {}
+
+        try {
+            allChar = safeAllCharacterStyles(doc);
+            allPara = safeAllParagraphStyles(doc);
+            candidates = [];
+            canonical = [];
+
+            counts.characterStyles = allChar.length;
+            counts.paragraphStyles = allPara.length;
+
+            for (i = 0; i < allChar.length; i++) {
+                style = allChar[i];
+                if (!valid(style)) { continue; }
+                if (isAuditCandidate(style)) {
+                    candidates.push(style);
+                    family = candidateFamily(style);
+                    if (family === "Unnamed Style") { counts.unnamedCharacterStyles++; }
+                    if (family === "Word Imported List Style") { counts.wordListCharacterStyles++; }
+                }
+            }
+            counts.candidateStyles = candidates.length;
+
+            census = censusParagraphDebris(allPara);
+            counts.unnamedParagraphStyles = census.unnamed;
+            counts.wordListParagraphStyles = census.wordList;
+
+            schemaAudit = validateFingerprintProperties(allChar);
+            fingerprintProps = schemaAudit.active;
+            counts.fingerprintWarnings = schemaAudit.warnings.length;
+            scanMeta.fingerprintActive = fingerprintProps.join(" | ");
+            scanMeta.fingerprintWarnings = schemaAudit.warnings.join(" | ");
+
+            for (i = 0; i < allChar.length; i++) {
+                style = allChar[i];
+                if (valid(style) && isCanonicalCandidate(style)) { canonical.push(style); }
+            }
+
+            status("Scanning direct usage...");
+            usageAudit = buildUsageMap(doc, candidates);
+            status("Indexing dependencies...");
+            depAudit = buildDependencyMap(doc, candidates, allChar);
+            bookAudit = bookScopeState(doc);
+
+            counts.usageWarnings = usageAudit.errors;
+            counts.dependencyWarnings = depAudit.errors;
+            counts.dependencyNA = depAudit.na.length;
+            counts.bookScope = bookAudit.label;
+            scanMeta.bookScope = bookAudit.label;
+            scanMeta.bookMethod = bookAudit.method;
+            scanMeta.usageWarnings = usageAudit.errorDetails.join(" | ");
+            scanMeta.dependencyWarnings = depAudit.errorDetails.join(" | ");
+            scanMeta.dependencyNA = depAudit.na.join(" | ");
+
+            for (i = 0; i < candidates.length; i++) {
+                style = candidates[i];
+                status("Auditing " + (i + 1) + " of " + candidates.length + ": " + styleName(style));
+
+                usage = usageAudit.map[styleKey(style)] || emptyUsage();
+                deps = depAudit.map[styleKey(style)] || emptyDependency();
+                substantive = hasSubstantiveFormatting(style);
+                matches = substantive ? equivalentCanonicalStyles(style, canonical) : [];
+
+                risk = classifyRisk(
+                    usage,
+                    deps,
+                    matches,
+                    usageAudit.errors,
+                    depAudit.errors,
+                    schemaAudit.warnings.length,
+                    bookAudit.blocksLow
+                );
+
+                deletionGate = deleteAfterReplaceGate(
+                    risk,
+                    usageAudit.errors,
+                    depAudit.errors,
+                    schemaAudit.warnings.length,
+                    bookAudit.blocksLow,
+                    deps
+                );
+
+                if (usage.runs > 0) { counts.directlyUsed++; }
+                if (deps.count > 0) { counts.referenced++; }
+                if (deps.exportMapCount > 0) { counts.exportMapped++; }
+                if (importedState(style) === "Yes") { counts.imported++; }
+
+                if (risk === "LOW") { counts.low++; }
+                else if (risk === "MEDIUM") { counts.medium++; }
+                else if (risk === "HIGH") { counts.high++; }
+                else if (risk === "REPLACE") { counts.replace++; }
+
+                rows.push({
+                    risk: risk,
+                    family: candidateFamily(style),
+                    styleName: styleName(style),
+                    styleId: safeProperty(style, "id", "-"),
+                    stylePath: styleQualifiedPath(style),
+                    imported: importedState(style),
+                    basedOn: styleRefName(safePropertyObject(style, "basedOn")),
+                    formattingState: substantive ? "SUBSTANTIVE" : "EMPTY SHELL",
+                    semanticState: deps.exportMapCount > 0 ? "EXPORT-MAPPED" : "NO EXPORT MAP",
+                    directRuns: usage.runs,
+                    characters: usage.characters,
+                    storyRuns: usage.storyRuns,
+                    tableRuns: usage.tableRuns,
+                    nestedTableRuns: usage.nestedTableRuns,
+                    footnoteRuns: usage.footnoteRuns,
+                    endnoteRuns: usage.endnoteRuns,
+                    oversetRuns: usage.oversetRuns,
+                    pages: usagePageText(usage),
+                    samples: usage.samples.join(" | "),
+                    firstUsage: usage.firstUsage,
+                    firstPageRef: usage.firstPageRef,
+                    firstPageSort: usage.firstPageSort,
+                    dependencyCount: deps.count,
+                    dependencies: deps.details.join(" | "),

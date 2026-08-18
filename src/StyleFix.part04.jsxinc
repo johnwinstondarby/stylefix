@@ -1,0 +1,180 @@
+
+    /* ---------- Dependency index ---------- */
+
+    function buildDependencyMap(doc, candidates, allChar) {
+        var audit = {
+            map:{}, lookup:buildCandidateLookup(candidates),
+            errors:0, errorDetails:[], na:[]
+        };
+        var i, j, k, item, ps, collection, options, refs, topic, topics;
+
+        for (i = 0; i < candidates.length; i++) {
+            audit.map[styleKey(candidates[i])] = emptyDependency();
+        }
+
+        try {
+            for (i = 0; i < allChar.length; i++) {
+                item = allChar[i];
+                if (!valid(item)) { continue; }
+                recordDependencyRef(audit, safePropertyObject(item, "basedOn"),
+                    "Based-on: " + styleName(item));
+            }
+        } catch (eBased) {
+            addGlobalAuditError(audit, "Character-style inheritance", eBased);
+        }
+
+        try {
+            collection = safeAllParagraphStyles(doc);
+            for (i = 0; i < collection.length; i++) {
+                ps = collection[i];
+                if (!valid(ps)) { continue; }
+                recordPropertyDependency(audit, ps, "dropCapStyle",
+                    "Paragraph " + styleName(ps) + " drop cap");
+                recordPropertyDependency(audit, ps, "bulletsCharacterStyle",
+                    "Paragraph " + styleName(ps) + " bullets");
+                recordPropertyDependency(audit, ps, "numberingCharacterStyle",
+                    "Paragraph " + styleName(ps) + " numbering");
+                recordAppliedStyleCollection(audit, safePropertyObject(ps, "nestedStyles"),
+                    "Paragraph " + styleName(ps) + " nested style");
+                recordAppliedStyleCollection(audit, safePropertyObject(ps, "nestedGrepStyles"),
+                    "Paragraph " + styleName(ps) + " nested GREP");
+                recordAppliedStyleCollection(audit, safePropertyObject(ps, "nestedLineStyles"),
+                    "Paragraph " + styleName(ps) + " nested line");
+            }
+        } catch (ePara) {
+            addGlobalAuditError(audit, "Paragraph-style references", ePara);
+        }
+
+        try {
+            collection = collectionElements(safePropertyObject(doc, "textVariables"));
+            for (i = 0; i < collection.length; i++) {
+                item = collection[i];
+                options = safePropertyObject(item, "variableOptions");
+                if (options !== null && propertyReadable(options, "appliedStyle")) {
+                    recordDependencyRef(audit, safePropertyObject(options, "appliedStyle"),
+                        "Text variable: " + safeProperty(item, "name", "#" + i));
+                }
+            }
+        } catch (eVar) {
+            addGlobalAuditError(audit, "Text-variable references", eVar);
+        }
+
+        try {
+            collection = collectionElements(safePropertyObject(doc, "crossReferenceFormats"));
+            for (i = 0; i < collection.length; i++) {
+                item = collection[i];
+                recordPropertyDependency(audit, item, "appliedCharacterStyle",
+                    "Cross-reference format: " + safeProperty(item, "name", "#" + i));
+                recordAppliedStyleCollection(audit, safePropertyObject(item, "buildingBlocks"),
+                    "Cross-reference building block: " + safeProperty(item, "name", "#" + i));
+            }
+        } catch (eCross) {
+            addGlobalAuditError(audit, "Cross-reference formats", eCross);
+        }
+
+        recordNamedSourceCollection(audit, safePropertyObject(doc, "hyperlinkTextSources"), "Hyperlink source");
+        recordNamedSourceCollection(audit, safePropertyObject(doc, "crossReferenceSources"), "Cross-reference source");
+
+        try {
+            collection = collectionElements(safePropertyObject(doc, "tocStyles"));
+            for (i = 0; i < collection.length; i++) {
+                item = collection[i];
+                refs = collectionElements(safePropertyObject(item, "tocStyleEntries"));
+                for (j = 0; j < refs.length; j++) {
+                    recordPropertyDependency(audit, refs[j], "pageNumberStyle",
+                        "TOC " + safeProperty(item, "name", "#" + i) + " page number");
+                    recordPropertyDependency(audit, refs[j], "separatorStyle",
+                        "TOC " + safeProperty(item, "name", "#" + i) + " separator");
+                }
+            }
+        } catch (eTOC) {
+            addGlobalAuditError(audit, "TOC references", eTOC);
+        }
+
+        options = safePropertyObject(doc, "footnoteOptions");
+        if (options !== null && propertyReadable(options, "footnoteMarkerStyle")) {
+            recordPropertyDependency(audit, options, "footnoteMarkerStyle", "Footnote marker style");
+        } else {
+            addNA(audit, "Footnote marker style property unavailable");
+        }
+
+        options = safePropertyObject(doc, "endnoteOptions");
+        if (options !== null && propertyReadable(options, "endnoteMarkerStyle")) {
+            recordPropertyDependency(audit, options, "endnoteMarkerStyle", "Endnote marker style");
+        } else {
+            addNA(audit, "Endnote marker style property unavailable");
+        }
+
+        if (propertyReadable(doc, "indexOptions")) {
+            options = safePropertyObject(doc, "indexOptions");
+            if (options !== null) {
+                recordPropertyDependency(audit, options, "pageNumberStyle", "Index option: page number");
+                recordPropertyDependency(audit, options, "crossReferenceStyle", "Index option: cross reference");
+                recordPropertyDependency(audit, options, "crossReferenceTopicStyle", "Index option: cross-reference topic");
+            }
+        } else {
+            addNA(audit, "Document.indexOptions unavailable");
+        }
+
+        try {
+            collection = collectionElements(safePropertyObject(doc, "indexes"));
+            for (i = 0; i < collection.length; i++) {
+                topics = safeArrayLike(safePropertyObject(collection[i], "allTopics"));
+                for (j = 0; j < topics.length; j++) {
+                    topic = topics[j];
+                    refs = collectionElements(safePropertyObject(topic, "pageReferences"));
+                    for (k = 0; k < refs.length; k++) {
+                        recordPropertyDependency(audit, refs[k], "pageNumberStyleOverride",
+                            "Index page-reference override: " + safeProperty(topic, "name", "topic"));
+                    }
+                }
+            }
+        } catch (eIndex) {
+            addGlobalAuditError(audit, "Index page-reference overrides", eIndex);
+        }
+
+        scanXmlMapCollection(audit, doc, "xmlImportMaps", "XML import style map");
+        scanXmlMapCollection(audit, doc, "xmlExportMaps", "XML export style map");
+        scanStyleExportTagMaps(audit, candidates);
+
+        return audit;
+    }
+
+    function emptyDependency() {
+        return {count:0, details:[], exportMapCount:0, exportDetails:[]};
+    }
+
+    function recordDependencyRef(audit, ref, detail) {
+        var key = candidateKeyForRef(ref, audit.lookup);
+        if (key === "" || audit.map[key] === undefined) { return; }
+        addDependencyByKey(audit, key, detail);
+    }
+
+    function addDependencyByKey(audit, key, detail) {
+        var item = audit.map[key];
+        if (item === undefined) { return; }
+        item.count++;
+        if (item.details.length < 50 && !containsString(item.details, detail)) {
+            item.details.push(detail);
+        }
+    }
+
+    function recordPropertyDependency(audit, obj, prop, detail) {
+        if (obj === null || obj === undefined || !propertyReadable(obj, prop)) { return; }
+        recordDependencyRef(audit, safePropertyObject(obj, prop), detail);
+    }
+
+    function recordAppliedStyleCollection(audit, collection, label) {
+        var elements = collectionElements(collection);
+        var i, item;
+        for (i = 0; i < elements.length; i++) {
+            item = elements[i];
+            if (!valid(item)) { continue; }
+            if (propertyReadable(item, "appliedCharacterStyle")) {
+                recordDependencyRef(audit, safePropertyObject(item, "appliedCharacterStyle"), label + " #" + i);
+            } else if (propertyReadable(item, "appliedStyle")) {
+                recordDependencyRef(audit, safePropertyObject(item, "appliedStyle"), label + " #" + i);
+            }
+        }
+    }
+

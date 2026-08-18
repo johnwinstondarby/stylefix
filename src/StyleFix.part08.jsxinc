@@ -1,0 +1,180 @@
+            row = rows[i];
+            f.writeln(csv([
+                row.risk,row.family,row.styleName,row.styleId,row.stylePath,row.imported,row.basedOn,
+                row.formattingState,row.semanticState,
+                row.directRuns,row.characters,row.storyRuns,row.tableRuns,row.nestedTableRuns,
+                row.footnoteRuns,row.endnoteRuns,row.oversetRuns,row.pages,row.samples,
+                row.dependencyCount,row.dependencies,row.exportMapCount,row.exportMaps,
+                row.usageWarningCount,row.usageWarnings,
+                row.dependencyWarningCount,row.dependencyWarnings,row.dependencyNA,
+                row.fingerprintWarningCount,row.fingerprintWarnings,
+                row.canonicalMatch,row.matchCount,row.deleteAfterReplaceGate,
+                row.bookScope,row.paragraphUnnamedCount,row.paragraphWordListCount,
+                row.suggestedAction,row.fingerprint
+            ]));
+        }
+
+        f.close();
+        status("CSV saved: " + target.fsName);
+        alert("StyleFix CSV saved.\n\n" + target.fsName);
+    }
+
+    function writeProvenance(f) {
+        f.writeln(csv(["# StyleFix Provenance","Value"]));
+        f.writeln(csv(["# Script Version",VERSION]));
+        f.writeln(csv(["# Release Tag",RELEASE_TAG]));
+        f.writeln(csv(["# Run Timestamp",scanMeta.scanTimestamp]));
+        f.writeln(csv(["# Document Name",scanMeta.documentName]));
+        f.writeln(csv(["# Document File Modified",scanMeta.documentModified]));
+        f.writeln(csv(["# InDesign Version",scanMeta.indesignVersion]));
+        f.writeln(csv(["# InDesign Build",scanMeta.indesignBuild]));
+        f.writeln(csv(["# Book Scope",scanMeta.bookScope]));
+        f.writeln(csv(["# Book Scope Method",scanMeta.bookMethod]));
+        f.writeln(csv(["# Candidate Families",FAMILY_TEXT]));
+        f.writeln(csv(["# Fingerprint Active Properties",scanMeta.fingerprintActive]));
+        f.writeln(csv(["# Fingerprint Dropped/Warnings",scanMeta.fingerprintWarnings]));
+        f.writeln(csv(["# Usage Scan Warnings",scanMeta.usageWarnings]));
+        f.writeln(csv(["# Dependency Scan Warnings",scanMeta.dependencyWarnings]));
+        f.writeln(csv(["# Dependency N/A",scanMeta.dependencyNA]));
+        f.writeln(csv(["# Risk Counts",
+            "LOW=" + counts.low + "; MEDIUM=" + counts.medium +
+            "; HIGH=" + counts.high + "; REPLACE=" + counts.replace]));
+        f.writeln(csv(["# Candidate Counts",
+            "Character=" + counts.candidateStyles +
+            "; Paragraph Unnamed=" + counts.unnamedParagraphStyles +
+            "; Paragraph Word Imported List=" + counts.wordListParagraphStyles]));
+        f.writeln("");
+    }
+
+    function sortRows() {
+        var rank = {"LOW":0,"MEDIUM":1,"REPLACE":2,"HIGH":3};
+        rows.sort(function (a,b) {
+            var ra = rank[a.risk] !== undefined ? rank[a.risk] : 9;
+            var rb = rank[b.risk] !== undefined ? rank[b.risk] : 9;
+            if (ra !== rb) { return ra - rb; }
+            return naturalStyleCompare(a.styleName,b.styleName);
+        });
+    }
+
+    /* ---------- General helpers ---------- */
+
+    function collectionElements(collection) {
+        var out = [], elements, i;
+        if (collection === null || collection === undefined) { return out; }
+        try {
+            elements = collection.everyItem().getElements();
+            if (elements && elements.length !== undefined) {
+                for (i = 0; i < elements.length; i++) { out.push(elements[i]); }
+                return out;
+            }
+        } catch (eEvery) {}
+        try {
+            for (i = 0; i < collection.length; i++) {
+                try { out.push(collection.item(i)); }
+                catch (eItem) { try { out.push(collection[i]); } catch (eIndex) {} }
+            }
+        } catch (eLength) {}
+        return out;
+    }
+
+    function safeArrayLike(value) {
+        var out = [], i;
+        if (value === null || value === undefined) { return out; }
+        try { if (value.constructor === Array) { return value; } } catch (eArray) {}
+        try { for (i = 0; i < value.length; i++) { out.push(value[i]); } } catch (e) {}
+        return out;
+    }
+
+    function safeAllCharacterStyles(doc) {
+        var out = [], all, i;
+        try {
+            all = doc.allCharacterStyles;
+            for (i = 0; i < all.length; i++) { out.push(all[i]); }
+        } catch (e) {}
+        return out;
+    }
+
+    function safeAllParagraphStyles(doc) {
+        var out = [], all, i;
+        try {
+            all = doc.allParagraphStyles;
+            for (i = 0; i < all.length; i++) { out.push(all[i]); }
+        } catch (e) {}
+        return out;
+    }
+
+    function importedState(style) {
+        try {
+            if (style.imported === true) { return "Yes"; }
+            if (style.imported === false) { return "No"; }
+        } catch (e) {}
+        return "?";
+    }
+
+    function textLength(obj) {
+        try { return String(obj.contents).length; } catch (e) { return 0; }
+    }
+
+    function styleName(style) {
+        try { return String(style.name); } catch (e) { return "<unknown>"; }
+    }
+
+    function styleRefName(ref) {
+        if (ref === null || ref === undefined) { return ""; }
+        try { if (ref.name !== undefined) { return String(ref.name); } } catch (eName) {}
+        try { return String(ref); } catch (eString) { return ""; }
+    }
+
+    function joinStyleNames(styles) {
+        var out = [], i;
+        for (i = 0; i < styles.length; i++) { out.push(styleName(styles[i])); }
+        return out.join(" | ");
+    }
+
+    function propertyReadable(obj, prop) {
+        var value;
+        if (obj === null || obj === undefined) { return false; }
+        try { value = obj[prop]; return value !== undefined; } catch (e) { return false; }
+    }
+
+    function readableValue(obj, prop) {
+        var value;
+        if (!propertyReadable(obj, prop)) { return ""; }
+        try { value = obj[prop]; } catch (e) { return ""; }
+        if (value === null || value === undefined) { return ""; }
+        try { return String(value); } catch (eString) { return ""; }
+    }
+
+    function safeProperty(obj, prop, fallback) {
+        try {
+            if (obj[prop] === null || obj[prop] === undefined) { return fallback; }
+            return String(obj[prop]);
+        } catch (e) { return fallback; }
+    }
+
+    function safePropertyObject(obj, prop) {
+        if (obj === null || obj === undefined) { return null; }
+        try { return obj[prop]; } catch (e) { return null; }
+    }
+
+    function safeAppProperty(prop) {
+        try { return String(app[prop]); } catch (e) { return ""; }
+    }
+
+    function safeName(obj) {
+        try { return String(obj.name); } catch (e) { return ""; }
+    }
+
+    function objectTypeName(obj) {
+        try { if (obj.reflect && obj.reflect.name) { return String(obj.reflect.name); } } catch (eR) {}
+        try { if (obj.constructor && obj.constructor.name) { return String(obj.constructor.name); } } catch (eC) {}
+        return "Object";
+    }
+
+    function objectKey(obj) {
+        var spec;
+        if (obj === null || obj === undefined) { return ""; }
+        try {
+            spec = String(obj.toSpecifier());
+            if (spec !== "") { return spec; }
+        } catch (eSpec) {}

@@ -1,0 +1,180 @@
+                    exportMapCount: deps.exportMapCount,
+                    exportMaps: deps.exportDetails.join(" | "),
+                    canonicalMatch: matches.length === 1 ? styleName(matches[0]) :
+                        (matches.length > 1 ? joinStyleNames(matches) : ""),
+                    matchCount: matches.length,
+                    deleteAfterReplaceGate: deletionGate,
+                    suggestedAction: suggestedAction(risk, matches, deps, substantive, deletionGate),
+                    fingerprint: formattingFingerprint(style),
+                    usageWarningCount: usageAudit.errors,
+                    usageWarnings: usageAudit.errorDetails.join(" | "),
+                    dependencyWarningCount: depAudit.errors,
+                    dependencyWarnings: depAudit.errorDetails.join(" | "),
+                    dependencyNA: depAudit.na.join(" | "),
+                    fingerprintWarningCount: schemaAudit.warnings.length,
+                    fingerprintWarnings: schemaAudit.warnings.join(" | "),
+                    bookScope: bookAudit.label,
+                    paragraphUnnamedCount: census.unnamed,
+                    paragraphWordListCount: census.wordList,
+                    style: style
+                });
+            }
+
+            sortRows();
+            refresh(doc);
+            status(rows.length > 0 ?
+                "Scan complete. Export CSV for canary/production review." :
+                "Scan complete. No candidate character styles were found; check paragraph census.");
+        } catch (eScan) {
+            status("Scan failed: " + errorSummary(eScan));
+            alert("StyleFix scan failed.\n\n" + errorSummary(eScan));
+        } finally {
+            if (oldUnit !== null) {
+                try { app.scriptPreferences.measurementUnit = oldUnit; } catch (eRestore) {}
+            }
+        }
+    }
+
+    function newCounts() {
+        return {
+            characterStyles:0, paragraphStyles:0, candidateStyles:0,
+            unnamedCharacterStyles:0, wordListCharacterStyles:0,
+            unnamedParagraphStyles:0, wordListParagraphStyles:0,
+            low:0, medium:0, high:0, replace:0,
+            directlyUsed:0, referenced:0, exportMapped:0, imported:0,
+            usageWarnings:0, dependencyWarnings:0, dependencyNA:0,
+            fingerprintWarnings:0, bookScope:"Standalone/No book evidence"
+        };
+    }
+
+    function newScanMeta(doc) {
+        return {
+            scanTimestamp:(new Date()).toString(),
+            documentName:docName(doc),
+            documentModified:fileModifiedText(doc),
+            indesignVersion:safeAppProperty("version"),
+            indesignBuild:safeAppProperty("buildNumber"),
+            bookScope:"",
+            bookMethod:"",
+            fingerprintActive:"",
+            fingerprintWarnings:"",
+            usageWarnings:"",
+            dependencyWarnings:"",
+            dependencyNA:""
+        };
+    }
+
+    function censusParagraphDebris(styles) {
+        var result = {unnamed:0, wordList:0};
+        var i, name;
+        for (i = 0; i < styles.length; i++) {
+            if (!valid(styles[i])) { continue; }
+            name = styleName(styles[i]);
+            if (UNNAMED_RE.test(name)) { result.unnamed++; }
+            if (WORD_LIST_RE.test(name)) { result.wordList++; }
+        }
+        return result;
+    }
+
+    /* ---------- Direct usage ---------- */
+
+    function buildUsageMap(doc, candidates) {
+        var audit = {
+            map:{}, lookup:buildCandidateLookup(candidates),
+            errors:0, errorDetails:[], visited:{}
+        };
+        var stories = collectionElements(safePropertyObject(doc, "stories"));
+        var endnotes, i, story;
+
+        for (i = 0; i < candidates.length; i++) {
+            audit.map[styleKey(candidates[i])] = emptyUsage();
+        }
+
+        for (i = 0; i < stories.length; i++) {
+            story = stories[i];
+            if (!valid(story)) { continue; }
+            try {
+                if (story.isEndnoteStory === true) { continue; }
+            } catch (eIsEndnote) {}
+            scanTextContainer(
+                story,
+                "Story " + safeProperty(story, "id", "#" + i),
+                audit, "STORY", 0, true
+            );
+        }
+
+        endnotes = collectionElements(safePropertyObject(doc, "endnotes"));
+        for (i = 0; i < endnotes.length; i++) {
+            scanNoteObject(endnotes[i], "Endnote " + i, audit, "ENDNOTE", 0);
+        }
+
+        return audit;
+    }
+
+    function scanTextContainer(container, label, audit, context, tableDepth, scanNotes) {
+        var key, ranges, tables, notes, endnotes, i;
+        if (container === null || container === undefined || !valid(container)) { return; }
+
+        key = objectKey(container);
+        if (key !== "" && audit.visited[key] === true) { return; }
+        if (key !== "") { audit.visited[key] = true; }
+
+        try {
+            ranges = collectionElements(container.textStyleRanges);
+            for (i = 0; i < ranges.length; i++) {
+                recordUsageRange(ranges[i], audit, context, tableDepth);
+            }
+        } catch (eRanges) {
+            addGlobalAuditError(audit, label + " textStyleRanges", eRanges);
+        }
+
+        try {
+            tables = collectionElements(container.tables);
+            for (i = 0; i < tables.length; i++) {
+                scanTable(tables[i], label + " table " + i, audit, tableDepth + 1);
+            }
+        } catch (eTables) {
+            addGlobalAuditError(audit, label + " tables", eTables);
+        }
+
+        if (scanNotes === true) {
+            try {
+                notes = collectionElements(container.footnotes);
+                for (i = 0; i < notes.length; i++) {
+                    scanNoteObject(notes[i], label + " footnote " + i, audit, "FOOTNOTE", tableDepth);
+                }
+            } catch (eFootnotes) {
+                addGlobalAuditError(audit, label + " footnotes", eFootnotes);
+            }
+
+            try {
+                endnotes = collectionElements(container.endnotes);
+                for (i = 0; i < endnotes.length; i++) {
+                    scanNoteObject(endnotes[i], label + " endnote " + i, audit, "ENDNOTE", tableDepth);
+                }
+            } catch (eEndnotes) {}
+        }
+    }
+
+    function scanTable(table, label, audit, tableDepth) {
+        var cells, i, text;
+        if (!valid(table)) { return; }
+        try {
+            cells = collectionElements(table.cells);
+            for (i = 0; i < cells.length; i++) {
+                if (!valid(cells[i])) { continue; }
+                text = firstTextObject(cells[i]);
+                if (text !== null) {
+                    scanTextContainer(text, label + " cell " + i, audit, "TABLE", tableDepth, true);
+                }
+            }
+        } catch (eCells) {
+            addGlobalAuditError(audit, label + " cells", eCells);
+        }
+    }
+
+    function scanNoteObject(note, label, audit, context, tableDepth) {
+        var text = firstTextObject(note);
+        if (text !== null) {
+            scanTextContainer(text, label, audit, context, tableDepth, true);
+        }

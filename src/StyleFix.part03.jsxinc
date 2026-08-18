@@ -1,0 +1,180 @@
+    }
+
+    function firstTextObject(obj) {
+        var elements;
+        try {
+            elements = collectionElements(obj.texts);
+            if (elements.length > 0 && valid(elements[0])) { return elements[0]; }
+        } catch (e) {}
+        return null;
+    }
+
+    function recordUsageRange(range, audit, context, tableDepth) {
+        var ref, key, usage, pageInfo, sample;
+        if (!valid(range)) { return; }
+
+        ref = safePropertyObject(range, "appliedCharacterStyle");
+        key = candidateKeyForRef(ref, audit.lookup);
+        if (key === "" || audit.map[key] === undefined) { return; }
+
+        usage = audit.map[key];
+        usage.runs++;
+        usage.characters += textLength(range);
+
+        if (context === "TABLE") {
+            if (tableDepth > 1) { usage.nestedTableRuns++; }
+            else { usage.tableRuns++; }
+        } else if (context === "FOOTNOTE") {
+            usage.footnoteRuns++;
+        } else if (context === "ENDNOTE") {
+            usage.endnoteRuns++;
+        } else {
+            usage.storyRuns++;
+        }
+
+        pageInfo = pagesForText(range);
+        addPages(usage, pageInfo);
+        if (pageInfo.overset === true) { usage.oversetRuns++; }
+
+        if (usage.firstUsage === null) {
+            usage.firstUsage = range;
+            usage.firstPageRef = pageInfo.firstPageRef;
+            usage.firstPageSort = pageInfo.firstPageSort;
+        }
+
+        if (usage.samples.length < 5) {
+            sample = previewText(safeContents(range));
+            if (sample.length > 0 && !containsString(usage.samples, sample)) {
+                usage.samples.push(sample);
+            }
+        }
+    }
+
+    function emptyUsage() {
+        return {
+            runs:0, characters:0,
+            storyRuns:0, tableRuns:0, nestedTableRuns:0,
+            footnoteRuns:0, endnoteRuns:0, oversetRuns:0,
+            pages:{}, pageNames:[], samples:[],
+            firstUsage:null, firstPageRef:null, firstPageSort:999999998,
+            overflow:false
+        };
+    }
+
+    function pagesForText(text) {
+        var result = {
+            names:[], firstPageRef:null, firstPageSort:999999998, overset:false
+        };
+        var frames, ips, i;
+
+        try {
+            frames = collectionElements(text.parentTextFrames);
+            for (i = 0; i < frames.length; i++) { addPageFromFrame(result, frames[i]); }
+        } catch (eFrames) {}
+
+        if (result.names.length === 0) {
+            ips = [];
+            try { ips.push(text.insertionPoints.item(0)); } catch (eFirst) {}
+            try { ips.push(text.insertionPoints.item(-1)); } catch (eLast) {}
+            for (i = 0; i < ips.length; i++) { addPageFromInsertionPoint(result, ips[i]); }
+        }
+
+        if (isOversetRange(text)) {
+            result.overset = true;
+            if (!containsString(result.names, "Overset/No page")) {
+                result.names.push("Overset/No page");
+            }
+        }
+
+        if (result.names.length === 0) {
+            result.names.push("No page/Pasteboard");
+        }
+        return result;
+    }
+
+    function isOversetRange(text) {
+        var story, ips, i, frames;
+        try {
+            story = text.parentStory;
+            if (!story || story.overflows !== true) { return false; }
+        } catch (eStory) { return false; }
+
+        ips = [];
+        try { ips.push(text.insertionPoints.item(0)); } catch (eFirst) {}
+        try { ips.push(text.insertionPoints.item(-1)); } catch (eLast) {}
+
+        if (ips.length === 0) { return true; }
+
+        for (i = 0; i < ips.length; i++) {
+            try {
+                frames = collectionElements(ips[i].parentTextFrames);
+                if (frames.length > 0 && hasPageFrame(frames)) { return false; }
+            } catch (eFrames) {}
+        }
+        return true;
+    }
+
+    function hasPageFrame(frames) {
+        var i, page;
+        for (i = 0; i < frames.length; i++) {
+            if (!valid(frames[i])) { continue; }
+            try {
+                page = frames[i].parentPage;
+                if (page !== null && valid(page)) { return true; }
+            } catch (e) {}
+        }
+        return false;
+    }
+
+    function addPageFromFrame(result, frame) {
+        var page;
+        if (!valid(frame)) { return; }
+        try {
+            page = frame.parentPage;
+            addPageObject(result, page);
+        } catch (e) {}
+    }
+
+    function addPageFromInsertionPoint(result, ip) {
+        var frames;
+        if (ip === null || !valid(ip)) { return; }
+        try {
+            frames = collectionElements(ip.parentTextFrames);
+            if (frames.length > 0) { addPageFromFrame(result, frames[0]); }
+        } catch (e) {}
+    }
+
+    function addPageObject(result, page) {
+        var name, sort;
+        if (page === null || !valid(page)) { return; }
+        try { name = String(page.name); } catch (eName) { return; }
+        if (!containsString(result.names, name)) { result.names.push(name); }
+        try {
+            sort = Number(page.documentOffset);
+            if (sort < result.firstPageSort) {
+                result.firstPageSort = sort;
+                result.firstPageRef = page;
+            }
+        } catch (eSort) {}
+    }
+
+    function addPages(usage, pageInfo) {
+        var i, name;
+        for (i = 0; i < pageInfo.names.length; i++) {
+            name = pageInfo.names[i];
+            if (usage.pages[name] !== true) {
+                usage.pages[name] = true;
+                if (usage.pageNames.length < 40) { usage.pageNames.push(name); }
+                else { usage.overflow = true; }
+            }
+        }
+        if (pageInfo.firstPageSort < usage.firstPageSort) {
+            usage.firstPageSort = pageInfo.firstPageSort;
+            usage.firstPageRef = pageInfo.firstPageRef;
+        }
+    }
+
+    function usagePageText(usage) {
+        if (usage.runs === 0) { return ""; }
+        return usage.pageNames.join(", ") + (usage.overflow ? ", ..." : "");
+    }
