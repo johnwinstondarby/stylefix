@@ -2,9 +2,12 @@
 #targetengine "StyleFix"
 
 /*
-StyleFix v1.0.1
-Read-only audit for Word/import-created character-style debris, initially focused on
-character styles whose names begin with "Unnamed Style".
+StyleFix v1.0.2
+Read-only audit for Word/import-created character-style debris.
+
+v1.0.2 audits two observed imported-style families:
+  - Unnamed Style *
+  - Word Imported List Style *
 
 For each candidate StyleFix reports:
   - imported state;
@@ -13,13 +16,14 @@ For each candidate StyleFix reports:
   - candidate equivalence to an existing named character style;
   - conservative deletion risk: LOW, MEDIUM, HIGH, or REPLACE.
 
-No styles or text are changed in v1.0.
+No styles or text are changed in v1.0.2.
 ExtendScript / ECMAScript 3 compatible.
 */
 
 (function () {
-    var VERSION = "1.0.1";
+    var VERSION = "1.0.2";
     var UNNAMED_RE = /^Unnamed Style(?:\s|$)/i;
+    var WORD_LIST_RE = /^Word Imported List Style/i;
     var rows = [];
     var counts = null;
     var ui = {};
@@ -38,13 +42,15 @@ ExtendScript / ECMAScript 3 compatible.
         var allStyles = safeAllCharacterStyles(doc);
         var candidates = [];
         var canonical = [];
-        var usageAudit, usageMap, usageScanErrors;
-        var i, style, usage, deps, matches, risk, action, imported;
+        var usageAudit, usageMap;
+        var i, style, usage, deps, matches, risk, action, imported, substantive, family;
 
         rows = [];
         counts = {
             characterStyles: allStyles.length,
+            candidateStyles: 0,
             unnamedStyles: 0,
+            wordListStyles: 0,
             low: 0,
             medium: 0,
             high: 0,
@@ -52,6 +58,8 @@ ExtendScript / ECMAScript 3 compatible.
             directlyUsed: 0,
             referenced: 0,
             imported: 0,
+            usageWarnings: 0,
+            dependencyWarnings: 0,
             scanWarnings: 0
         };
 
@@ -60,18 +68,21 @@ ExtendScript / ECMAScript 3 compatible.
         for (i = 0; i < allStyles.length; i++) {
             style = allStyles[i];
             if (!valid(style)) { continue; }
-            if (UNNAMED_RE.test(styleName(style))) {
+            if (isAuditCandidate(style)) {
                 candidates.push(style);
+                family = candidateFamily(style);
+                if (family === "Unnamed Style") { counts.unnamedStyles++; }
+                else if (family === "Word Imported List Style") { counts.wordListStyles++; }
             } else if (isCanonicalCandidate(style)) {
                 canonical.push(style);
             }
         }
 
-        counts.unnamedStyles = candidates.length;
+        counts.candidateStyles = candidates.length;
         usageAudit = buildUsageMap(doc, candidates);
         usageMap = usageAudit.map;
-        usageScanErrors = usageAudit.errors;
-        counts.scanWarnings += usageScanErrors;
+        counts.usageWarnings = usageAudit.errors;
+        counts.scanWarnings += usageAudit.errors;
 
         for (i = 0; i < candidates.length; i++) {
             style = candidates[i];
@@ -79,14 +90,17 @@ ExtendScript / ECMAScript 3 compatible.
 
             usage = usageMap[styleKey(style)] || emptyUsage();
             deps = dependencyInfo(doc, style, allStyles);
-            matches = equivalentCanonicalStyles(style, canonical);
+            substantive = hasSubstantiveFormatting(style);
+            matches = substantive ? equivalentCanonicalStyles(style, canonical) : [];
             imported = importedState(style);
-            risk = classifyRisk(usage, deps, matches, usageScanErrors);
-            action = suggestedAction(risk, matches, deps);
+            family = candidateFamily(style);
+            risk = classifyRisk(usage, deps, matches, usageAudit.errors);
+            action = suggestedAction(risk, matches, deps, substantive);
 
             if (usage.runs > 0) { counts.directlyUsed++; }
             if (deps.count > 0) { counts.referenced++; }
             if (imported === "Yes") { counts.imported++; }
+            counts.dependencyWarnings += deps.errors;
             counts.scanWarnings += deps.errors;
 
             if (risk === "LOW") { counts.low++; }
@@ -96,6 +110,7 @@ ExtendScript / ECMAScript 3 compatible.
 
             rows.push({
                 risk: risk,
+                family: family,
                 styleName: styleName(style),
                 styleId: safeProperty(style, "id", "-"),
                 imported: imported,
@@ -105,11 +120,15 @@ ExtendScript / ECMAScript 3 compatible.
                 pages: usagePageText(usage),
                 firstPageSort: usage.firstPageSort,
                 samples: usage.samples.join(" | "),
+                usageWarningCount: usageAudit.errors,
+                usageWarnings: usageAudit.errorDetails.join(" | "),
                 dependencyCount: deps.count,
                 dependencies: deps.details.join(" | "),
-                dependencyErrors: deps.errors + usageScanErrors,
+                dependencyWarningCount: deps.errors,
+                dependencyWarnings: deps.errorDetails.join(" | "),
                 canonicalMatch: matches.length === 1 ? styleName(matches[0]) : (matches.length > 1 ? joinStyleNames(matches) : ""),
                 matchCount: matches.length,
+                formattingState: substantive ? "SUBSTANTIVE" : "EMPTY SHELL",
                 fingerprint: formattingFingerprint(style),
                 action: action,
                 style: style,
@@ -122,7 +141,7 @@ ExtendScript / ECMAScript 3 compatible.
         refresh(doc);
 
         if (rows.length === 0) {
-            status("Scan complete. No character styles named Unnamed Style * were found.");
+            status("Scan complete. No imported-style debris candidates were found.");
         } else {
             status("Scan complete. Select a style and click Locate First Use, or export the audit CSV.");
         }
@@ -131,6 +150,7 @@ ExtendScript / ECMAScript 3 compatible.
     function buildUsageMap(doc, candidates) {
         var map = {};
         var errors = 0;
+        var errorDetails = [];
         var nameMap = {};
         var i, s, r, story, ranges, range, style, key, name;
         var usage, len, pageInfo, sample;
@@ -183,10 +203,12 @@ ExtendScript / ECMAScript 3 compatible.
                 }
             } catch (eRanges) {
                 errors++;
+                addAuditWarning(errorDetails,
+                    "Usage scan story " + safeProperty(story, "id", "#" + s), eRanges);
             }
         }
 
-        return {map: map, errors: errors};
+        return {map: map, errors: errors, errorDetails: errorDetails};
     }
 
     function emptyUsage() {
@@ -268,8 +290,8 @@ ExtendScript / ECMAScript 3 compatible.
     }
 
     function dependencyInfo(doc, target, allStyles) {
-        var info = {count: 0, details: [], errors: 0};
-        var i, j, style, ps, collection, item, obj, options, indexObj, topics, topic, refs, ref;
+        var info = {count: 0, details: [], errors: 0, errorDetails: []};
+        var i, j, k, style, ps, collection, obj, options, indexObj, topics, topic, refs, ref;
 
         try {
             for (i = 0; i < allStyles.length; i++) {
@@ -279,7 +301,9 @@ ExtendScript / ECMAScript 3 compatible.
                     addDependency(info, "Based-on: " + styleName(style));
                 }
             }
-        } catch (eBasedOn) { info.errors++; }
+        } catch (eBasedOn) {
+            addDependencyWarning(info, "Character-style inheritance", eBasedOn);
+        }
 
         try {
             collection = doc.allParagraphStyles;
@@ -293,7 +317,9 @@ ExtendScript / ECMAScript 3 compatible.
                 scanAppliedStyleCollection(info, safePropertyObject(ps, "nestedGrepStyles"), target, "Paragraph " + styleName(ps) + " nested GREP");
                 scanAppliedStyleCollection(info, safePropertyObject(ps, "nestedLineStyles"), target, "Paragraph " + styleName(ps) + " nested line");
             }
-        } catch (eParagraphStyles) { info.errors++; }
+        } catch (eParagraphStyles) {
+            addDependencyWarning(info, "Paragraph-style references", eParagraphStyles);
+        }
 
         try {
             collection = doc.textVariables;
@@ -305,7 +331,9 @@ ExtendScript / ECMAScript 3 compatible.
                     addDependency(info, "Text variable: " + safeProperty(obj, "name", "#" + i));
                 }
             }
-        } catch (eVariables) { info.errors++; }
+        } catch (eVariables) {
+            addDependencyWarning(info, "Text-variable references", eVariables);
+        }
 
         try {
             collection = doc.crossReferenceFormats;
@@ -315,9 +343,12 @@ ExtendScript / ECMAScript 3 compatible.
                 if (styleRefMatches(safePropertyObject(obj, "appliedCharacterStyle"), target)) {
                     addDependency(info, "Cross-reference format: " + safeProperty(obj, "name", "#" + i));
                 }
-                scanAppliedStyleCollection(info, safePropertyObject(obj, "buildingBlocks"), target, "Cross-reference building block: " + safeProperty(obj, "name", "#" + i));
+                scanAppliedStyleCollection(info, safePropertyObject(obj, "buildingBlocks"), target,
+                    "Cross-reference building block: " + safeProperty(obj, "name", "#" + i));
             }
-        } catch (eCrossFormats) { info.errors++; }
+        } catch (eCrossFormats) {
+            addDependencyWarning(info, "Cross-reference formats", eCrossFormats);
+        }
 
         scanNamedSourceCollection(info, safePropertyObject(doc, "hyperlinkTextSources"), target, "Hyperlink source");
         scanNamedSourceCollection(info, safePropertyObject(doc, "crossReferenceSources"), target, "Cross-reference source");
@@ -340,7 +371,9 @@ ExtendScript / ECMAScript 3 compatible.
                     }
                 }
             }
-        } catch (eTOC) { info.errors++; }
+        } catch (eTOC) {
+            addDependencyWarning(info, "TOC references", eTOC);
+        }
 
         try {
             options = doc.indexOptions;
@@ -349,7 +382,9 @@ ExtendScript / ECMAScript 3 compatible.
                 checkStyleProperty(info, options, "crossReferenceStyle", target, "Index option: cross reference");
                 checkStyleProperty(info, options, "crossReferenceTopicStyle", target, "Index option: cross-reference topic");
             }
-        } catch (eIndexOptions) { info.errors++; }
+        } catch (eIndexOptions) {
+            addDependencyWarning(info, "Index options", eIndexOptions);
+        }
 
         try {
             collection = doc.indexes;
@@ -361,7 +396,7 @@ ExtendScript / ECMAScript 3 compatible.
                     topic = topics[j];
                     if (!valid(topic)) { continue; }
                     refs = topic.pageReferences;
-                    for (var k = 0; k < refs.length; k++) {
+                    for (k = 0; k < refs.length; k++) {
                         ref = refs.item(k);
                         if (!valid(ref)) { continue; }
                         if (styleRefMatches(safePropertyObject(ref, "pageNumberStyleOverride"), target)) {
@@ -370,7 +405,9 @@ ExtendScript / ECMAScript 3 compatible.
                     }
                 }
             }
-        } catch (ePageRefs) { info.errors++; }
+        } catch (ePageRefs) {
+            addDependencyWarning(info, "Index page-reference overrides", ePageRefs);
+        }
 
         return info;
     }
@@ -386,7 +423,9 @@ ExtendScript / ECMAScript 3 compatible.
                     addDependency(info, label + ": " + safeProperty(item, "name", "#" + i));
                 }
             }
-        } catch (e) { info.errors++; }
+        } catch (e) {
+            addDependencyWarning(info, label + " collection", e);
+        }
     }
 
     function scanAppliedStyleCollection(info, collection, target, label) {
@@ -400,7 +439,9 @@ ExtendScript / ECMAScript 3 compatible.
                     addDependency(info, label + " #" + i);
                 }
             }
-        } catch (e) { info.errors++; }
+        } catch (e) {
+            addDependencyWarning(info, label, e);
+        }
     }
 
     function checkStyleProperty(info, obj, prop, target, label) {
@@ -418,88 +459,173 @@ ExtendScript / ECMAScript 3 compatible.
         }
     }
 
+    function addDependencyWarning(info, label, err) {
+        info.errors++;
+        addAuditWarning(info.errorDetails, label, err);
+    }
+
+    function addAuditWarning(list, label, err) {
+        var detail = label;
+        var message = errorSummary(err);
+        if (message.length > 0) { detail += ": " + message; }
+        if (list.length < 30 && !containsString(list, detail)) {
+            list.push(detail);
+        }
+    }
+
+    function errorSummary(err) {
+        var parts = [];
+        try { if (err.message) { parts.push(String(err.message)); } } catch (eMessage) {}
+        try { if (err.number !== undefined) { parts.push("Error " + String(err.number)); } } catch (eNumber) {}
+        try { if (err.line !== undefined) { parts.push("line " + String(err.line)); } } catch (eLine) {}
+        return parts.join(" | ");
+    }
+
     function equivalentCanonicalStyles(target, canonical) {
-        var out = [];
-        var targetFingerprint = formattingFingerprint(target);
+        var matches = [];
+        var targetFP;
         var i, style;
 
-        if (targetFingerprint === "") { return out; }
+        if (!hasSubstantiveFormatting(target)) {
+            return matches;
+        }
+
+        targetFP = formattingFingerprint(target);
+        if (targetFP === "") { return matches; }
 
         for (i = 0; i < canonical.length; i++) {
             style = canonical[i];
-            if (!valid(style)) { continue; }
-            if (formattingFingerprint(style) === targetFingerprint) {
-                out.push(style);
+            if (!valid(style) || sameStyle(style, target)) { continue; }
+            if (!hasSubstantiveFormatting(style)) { continue; }
+            if (formattingFingerprint(style) === targetFP) {
+                matches.push(style);
             }
         }
-        return out;
+        return matches;
+    }
+
+    function fingerprintProperties() {
+        return [
+            "appliedFont", "fontStyle", "pointSize", "leading", "tracking",
+            "capitalization", "position", "underline", "strikeThru", "noBreak",
+            "horizontalScale", "verticalScale", "baselineShift", "skew", "ligatures",
+            "fillColor", "fillTint", "strokeColor", "strokeTint", "strokeWeight",
+            "overprintFill", "overprintStroke"
+        ];
     }
 
     function formattingFingerprint(style) {
+        var props = fingerprintProperties();
         var parts = [];
-        var props = [
-            "appliedFont", "fontStyle", "pointSize", "leading", "tracking",
-            "kerningMethod", "position", "horizontalScale", "verticalScale",
-            "baselineShift", "skew", "capitalization", "underline", "strikeThru",
-            "fillColor", "fillTint", "strokeColor", "strokeTint", "strokeWeight",
-            "ligatures", "noBreak", "language", "otfFigureStyle"
-        ];
-        var i, value;
-
+        var i;
+        if (!valid(style)) { return ""; }
         for (i = 0; i < props.length; i++) {
-            value = fingerprintValue(safePropertyObject(style, props[i]));
-            parts.push(props[i] + "=" + value);
+            parts.push(props[i] + "=" + normalizedProperty(style, props[i]));
         }
-        return parts.join("|");
+        return parts.join(";");
     }
 
-    function fingerprintValue(value) {
+    function hasSubstantiveFormatting(style) {
+        var props = fingerprintProperties();
+        var i, value;
+        if (!valid(style)) { return false; }
+
+        for (i = 0; i < props.length; i++) {
+            try {
+                value = style[props[i]];
+            } catch (eProperty) {
+                continue;
+            }
+            if (!isNothingValue(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function isNothingValue(value) {
+        var s;
+        if (value === null || value === undefined) { return true; }
+        try {
+            if (NothingEnum !== undefined && value === NothingEnum.NOTHING) {
+                return true;
+            }
+        } catch (eEnum) {}
+        try { s = String(value).toLowerCase(); } catch (eString) { return false; }
+        s = s.replace(/\s+/g, "");
+        if (s === "" || s === "nothing" || s === "<null>" || s === "<unavailable>") {
+            return true;
+        }
+        if (s.indexOf("nothingenum") >= 0) { return true; }
+        return false;
+    }
+
+    function normalizedProperty(obj, prop) {
+        var value;
+        try { value = obj[prop]; } catch (e) { return "<unavailable>"; }
         if (value === null || value === undefined) { return "<null>"; }
+        if (isNothingValue(value)) { return "NOTHING"; }
+
+        if (prop === "appliedFont") {
+            try { if (value.fullName !== undefined) { return String(value.fullName); } } catch (eFont) {}
+            try { if (value.name !== undefined) { return String(value.name); } } catch (eFontName) {}
+        }
+        if (prop === "fillColor" || prop === "strokeColor") {
+            return styleRefName(value);
+        }
         try {
-            if (value.name !== undefined) { return "name:" + String(value.name); }
-        } catch (eName) {}
-        try {
-            if (value.id !== undefined) { return "id:" + String(value.id); }
-        } catch (eId) {}
-        try { return String(value); } catch (eString) { return "<?>"; }
+            if (value.constructor === Array) { return value.join("/"); }
+        } catch (eArray) {}
+        try { return String(value); } catch (eString) { return "<unprintable>"; }
     }
 
     function classifyRisk(usage, deps, matches, usageScanErrors) {
-        var uncertain = usageScanErrors > 0 || deps.errors > 0;
-        var usedOrReferenced = usage.runs > 0 || deps.count > 0;
-
-        if (usedOrReferenced && matches.length === 1 && !uncertain) {
-            return "REPLACE";
-        }
-        if (usedOrReferenced) {
+        if (usage.runs > 0 || deps.count > 0) {
+            if (deps.errors > 0 || usageScanErrors > 0) { return "HIGH"; }
+            if (matches.length === 1) { return "REPLACE"; }
             return "HIGH";
         }
-        if (uncertain) {
-            return "MEDIUM";
-        }
+        if (deps.errors > 0 || usageScanErrors > 0) { return "MEDIUM"; }
         return "LOW";
     }
 
-    function suggestedAction(risk, matches, deps) {
-        if (risk === "LOW") { return "Safe deletion candidate"; }
-        if (risk === "REPLACE") { return "Review replacement with " + styleName(matches[0]); }
-        if (risk === "MEDIUM") { return "Review audit warning before deletion"; }
-        if (deps.count > 0) { return "Resolve usage/dependencies before deletion"; }
-        return "Review direct uses before deletion";
+    function suggestedAction(risk, matches, deps, substantive) {
+        if (risk === "LOW") {
+            return substantive ? "Safe deletion candidate after selected re-check" :
+                "Empty imported shell; safe deletion candidate after selected re-check";
+        }
+        if (risk === "MEDIUM") {
+            return substantive ? "Review audit warnings before deletion" :
+                "Empty imported shell; review audit warnings before deletion";
+        }
+        if (risk === "REPLACE") {
+            return "Replace with " + styleName(matches[0]) + ", verify references, then delete";
+        }
+        if (deps.count > 0) {
+            return "Resolve text usage/dependencies before deletion";
+        }
+        return "Review applied text before deletion";
     }
 
-    function importedState(style) {
-        try {
-            return style.imported === true ? "Yes" : "No";
-        } catch (e) {
-            return "Unknown";
-        }
+    function isAuditCandidate(style) {
+        var name = styleName(style);
+        return UNNAMED_RE.test(name) || WORD_LIST_RE.test(name);
+    }
+
+    function candidateFamily(style) {
+        var name = styleName(style);
+        if (UNNAMED_RE.test(name)) { return "Unnamed Style"; }
+        if (WORD_LIST_RE.test(name)) { return "Word Imported List Style"; }
+        return "Other";
     }
 
     function isCanonicalCandidate(style) {
         var name = styleName(style);
-        if (name === "[None]" || name === "None" || name === "") { return false; }
-        if (UNNAMED_RE.test(name)) { return false; }
+        if (name === "" || name === "[None]") { return false; }
+        if (isAuditCandidate(style)) { return false; }
+        if (/^Word Imported /i.test(name)) { return false; }
+        if (importedState(style) === "Yes") { return false; }
+        if (!hasSubstantiveFormatting(style)) { return false; }
         return true;
     }
 
@@ -512,20 +638,20 @@ ExtendScript / ECMAScript 3 compatible.
         ui.win.margins = 12;
         ui.win.spacing = 8;
 
-        ui.title = ui.win.add("statictext", undefined, "Unnamed Character Style Audit");
+        ui.title = ui.win.add("statictext", undefined, "Imported Character Style Debris Audit");
         try {
             ui.title.graphics.font = ScriptUI.newFont(ui.title.graphics.font.name, "BOLD", 15);
         } catch (eFont) {}
 
         ui.summary = ui.win.add("statictext", undefined, "", {multiline: true});
-        ui.summary.preferredSize = [1120, 92];
+        ui.summary.preferredSize = [1160, 104];
 
         ui.list = ui.win.add("listbox", undefined, [], {multiselect: false});
-        ui.list.preferredSize = [1120, 440];
+        ui.list.preferredSize = [1160, 440];
         ui.list.onDoubleClick = locateFirstUse;
 
         ui.status = ui.win.add("statictext", undefined, "");
-        ui.status.preferredSize = [1120, 34];
+        ui.status.preferredSize = [1160, 34];
 
         buttons = ui.win.add("group");
         buttons.alignment = ["right", "top"];
@@ -550,66 +676,66 @@ ExtendScript / ECMAScript 3 compatible.
         for (i = 0; i < rows.length; i++) {
             row = rows[i];
             line = fixed(row.risk, 8) + "  " +
-                   fixed(row.styleName, 26) + "  " +
-                   "Uses " + fixed(row.directRuns, 6) + "  " +
-                   "Chars " + fixed(row.characters, 8) + "  " +
-                   "Deps " + fixed(row.dependencyCount, 5) + "  " +
+                   fixed(row.styleName, 30) + "  " +
+                   fixed(row.formattingState, 12) + "  " +
+                   "Use " + fixed(row.directRuns, 5) + "  " +
+                   "Chars " + fixed(row.characters, 7) + "  " +
+                   "Deps " + fixed(row.dependencyCount, 4) + "  " +
+                   "Warn U" + row.usageWarningCount + "/D" + row.dependencyWarningCount + "  " +
                    "Match " + fixed(row.canonicalMatch || "-", 24) + "  " +
-                   fixed(row.pages || "-", 22) + "  " +
-                   row.samples;
+                   fixed(row.pages || "-", 24);
             ui.list.add("item", line);
         }
 
         ui.summary.text = docName(doc) + "\n" +
             "Character styles: " + counts.characterStyles +
-            "    Unnamed candidates: " + counts.unnamedStyles +
-            "    Directly used: " + counts.directlyUsed +
-            "    Referenced: " + counts.referenced +
+            "    Audit candidates: " + counts.candidateStyles +
+            "    Unnamed: " + counts.unnamedStyles +
+            "    Word Imported List: " + counts.wordListStyles +
             "    Imported: " + counts.imported + "\n" +
-            "Risk: HIGH=" + counts.high +
-            "  REPLACE=" + counts.replace +
-            "  MEDIUM=" + counts.medium +
-            "  LOW=" + counts.low +
-            "    Audit warnings: " + counts.scanWarnings;
+            "Directly used: " + counts.directlyUsed +
+            "    Referenced: " + counts.referenced +
+            "    Usage-scan warnings: " + counts.usageWarnings +
+            "    Dependency warnings: " + counts.dependencyWarnings + "\n" +
+            "LOW: " + counts.low +
+            "    MEDIUM: " + counts.medium +
+            "    HIGH: " + counts.high +
+            "    REPLACE: " + counts.replace;
 
         try { ui.win.layout.layout(true); } catch (eLayout) {}
     }
 
     function locateFirstUse() {
-        var row, target, located = false;
-
+        var row, text, located = false;
         if (ui.list.selection === null) {
             alert("Select a StyleFix row first.");
             return;
         }
 
         row = rows[ui.list.selection.index];
-        if (!row) { return; }
-
-        if (row.firstUsage === null || !valid(row.firstUsage)) {
-            alert(row.styleName + " has no direct text use to locate.\n\n" +
-                  "Risk: " + row.risk + "\n" +
-                  "Dependencies: " + row.dependencyCount +
-                  (row.dependencies.length > 0 ? "\n\n" + row.dependencies : ""));
+        if (!row || row.firstUsage === null || !valid(row.firstUsage)) {
+            alert("This style has no direct text usage to locate.\n\n" +
+                  "Risk: " + (row ? row.risk : "?") +
+                  (row && row.dependencies ? "\nDependencies: " + row.dependencies : ""));
             return;
         }
 
-        target = row.firstUsage;
+        text = row.firstUsage;
         try {
             if (row.firstPageRef !== null && valid(row.firstPageRef)) {
                 app.activeWindow.activePage = row.firstPageRef;
             }
         } catch (ePage) {}
 
-        try { target.showText(); located = true; } catch (eShow) {}
-        try { app.select(target); located = true; } catch (eSelect) {
-            try { app.select(target.insertionPoints.item(0)); located = true; } catch (eIP) {}
+        try { text.showText(); located = true; } catch (eShow) {}
+        try { app.select(text); located = true; } catch (eSelect) {
+            try { app.select(text.insertionPoints.item(0)); located = true; } catch (eIP) {}
         }
 
         if (located) {
             status("Located first direct use of " + row.styleName + ".");
         } else {
-            alert("InDesign could not navigate to the first use of " + row.styleName + ".");
+            alert("InDesign could not navigate to the first recorded use of " + row.styleName + ".");
         }
     }
 
@@ -631,20 +757,25 @@ ExtendScript / ECMAScript 3 compatible.
         }
 
         f.writeln(csv([
-            "Risk", "Style Name", "Style ID", "Imported", "Based On",
+            "Risk", "Family", "Style Name", "Style ID", "Imported", "Based On",
             "Direct Runs", "Characters", "Pages", "Sample Text",
-            "Dependency Count", "Dependencies", "Audit Warnings",
-            "Canonical Match", "Canonical Match Count", "Formatting Fingerprint",
-            "Suggested Action"
+            "Usage Warning Count", "Usage Warnings",
+            "Dependency Count", "Dependencies",
+            "Dependency Warning Count", "Dependency Warnings",
+            "Formatting State", "Canonical Match", "Canonical Match Count",
+            "Suggested Action", "Formatting Fingerprint"
         ]));
 
         for (i = 0; i < rows.length; i++) {
             row = rows[i];
             f.writeln(csv([
-                row.risk, row.styleName, row.styleId, row.imported, row.basedOn,
+                row.risk, row.family, row.styleName, row.styleId, row.imported, row.basedOn,
                 row.directRuns, row.characters, row.pages, row.samples,
-                row.dependencyCount, row.dependencies, row.dependencyErrors,
-                row.canonicalMatch, row.matchCount, row.fingerprint, row.action
+                row.usageWarningCount, row.usageWarnings,
+                row.dependencyCount, row.dependencies,
+                row.dependencyWarningCount, row.dependencyWarnings,
+                row.formattingState, row.canonicalMatch, row.matchCount,
+                row.action, row.fingerprint
             ]));
         }
 
@@ -654,67 +785,78 @@ ExtendScript / ECMAScript 3 compatible.
     }
 
     function sortRows() {
+        var rank = {"HIGH": 0, "REPLACE": 1, "MEDIUM": 2, "LOW": 3};
         rows.sort(function (a, b) {
-            var ra = riskRank(a.risk);
-            var rb = riskRank(b.risk);
+            var ra = rank[a.risk] !== undefined ? rank[a.risk] : 9;
+            var rb = rank[b.risk] !== undefined ? rank[b.risk] : 9;
             if (ra !== rb) { return ra - rb; }
-            if (a.firstPageSort !== b.firstPageSort) { return a.firstPageSort - b.firstPageSort; }
-            return numericSuffix(a.styleName) - numericSuffix(b.styleName);
+            return naturalStyleCompare(a.styleName, b.styleName);
         });
     }
 
-    function riskRank(risk) {
-        if (risk === "HIGH") { return 0; }
-        if (risk === "REPLACE") { return 1; }
-        if (risk === "MEDIUM") { return 2; }
-        return 3;
-    }
-
-    function numericSuffix(name) {
-        var m = String(name).match(/(\d+)\s*$/);
-        return m ? Number(m[1]) : 999999999;
+    function naturalStyleCompare(a, b) {
+        var ma = String(a).match(/^(.*?)(\d+)$/);
+        var mb = String(b).match(/^(.*?)(\d+)$/);
+        if (ma && mb && ma[1] === mb[1]) {
+            return Number(ma[2]) - Number(mb[2]);
+        }
+        a = String(a).toLowerCase();
+        b = String(b).toLowerCase();
+        if (a < b) { return -1; }
+        if (a > b) { return 1; }
+        return 0;
     }
 
     function safeAllCharacterStyles(doc) {
-        var out = [];
+        var result = [];
         var all, i;
         try {
             all = doc.allCharacterStyles;
-            for (i = 0; i < all.length; i++) {
-                if (valid(all[i])) { out.push(all[i]); }
-            }
+            for (i = 0; i < all.length; i++) { result.push(all[i]); }
         } catch (e) {}
-        return out;
+        return result;
     }
 
-    function styleKey(style) {
-        try { return "id:" + String(style.id); } catch (eId) {}
-        return "name:" + styleName(style);
+    function importedState(style) {
+        try {
+            if (style.imported === true) { return "Yes"; }
+            if (style.imported === false) { return "No"; }
+        } catch (e) {}
+        return "?";
     }
 
     function sameStyle(a, b) {
         if (a === null || b === null || a === undefined || b === undefined) { return false; }
-        try { return String(a.id) === String(b.id); } catch (eId) {}
-        return styleName(a) === styleName(b);
+        try { return Number(a.id) === Number(b.id); } catch (eId) {}
+        try { return String(a.toSpecifier()) === String(b.toSpecifier()); } catch (eSpec) {}
+        return false;
     }
 
     function styleRefMatches(ref, target) {
-        if (ref === null || ref === undefined) { return false; }
-        return sameStyle(ref, target) || styleRefName(ref) === styleName(target);
+        if (ref === null || ref === undefined || target === null || target === undefined) { return false; }
+        if (sameStyle(ref, target)) { return true; }
+        try { return String(ref) === styleName(target); } catch (e) { return false; }
     }
 
-    function styleRefName(style) {
-        if (style === null || style === undefined) { return ""; }
-        try { return String(style.name); } catch (eName) {}
-        try { return String(style); } catch (eString) { return ""; }
+    function styleKey(style) {
+        try { return "ID:" + String(style.id); } catch (eId) {}
+        return "NAME:" + styleName(style);
     }
 
     function styleName(style) {
         try { return String(style.name); } catch (e) { return "<unknown>"; }
     }
 
-    function safeCollectionLength(obj, prop) {
-        try { return obj[prop].length; } catch (e) { return 0; }
+    function styleRefName(ref) {
+        if (ref === null || ref === undefined) { return ""; }
+        try { if (ref.name !== undefined) { return String(ref.name); } } catch (eName) {}
+        try { return String(ref); } catch (eString) { return ""; }
+    }
+
+    function joinStyleNames(styles) {
+        var names = [], i;
+        for (i = 0; i < styles.length; i++) { names.push(styleName(styles[i])); }
+        return names.join(" | ");
     }
 
     function previewText(value) {
@@ -722,12 +864,8 @@ ExtendScript / ECMAScript 3 compatible.
         s = s.replace(/[\r\n\t]+/g, " ");
         s = s.replace(/  +/g, " ");
         s = s.replace(/^ +/, "").replace(/ +$/, "");
-        if (s.length > 120) { s = s.substring(0, 117) + "..."; }
+        if (s.length > 110) { s = s.substring(0, 107) + "..."; }
         return s;
-    }
-
-    function safeContents(obj) {
-        try { return obj.contents; } catch (e) { return ""; }
     }
 
     function containsString(arr, value) {
@@ -738,29 +876,31 @@ ExtendScript / ECMAScript 3 compatible.
         return false;
     }
 
-    function joinStyleNames(styles) {
-        var names = [], i;
-        for (i = 0; i < styles.length; i++) { names.push(styleName(styles[i])); }
-        return names.join(" | ");
+    function safeCollectionLength(obj, prop) {
+        try { return Number(obj[prop].length); } catch (e) { return 0; }
     }
 
-    function valid(obj) {
-        try { return obj !== null && obj.isValid === true; } catch (e) { return false; }
+    function safeContents(obj) {
+        try { return obj.contents; } catch (e) { return ""; }
     }
 
     function safeProperty(obj, name, fallback) {
-        try {
-            var value = obj[name];
-            if (value === undefined || value === null) { return fallback; }
-            return String(value);
-        } catch (e) { return fallback; }
+        try { return String(obj[name]); } catch (e) { return fallback; }
     }
 
     function safePropertyObject(obj, name) {
-        try {
-            var value = obj[name];
-            return value === undefined ? null : value;
-        } catch (e) { return null; }
+        try { return obj[name]; } catch (e) { return null; }
+    }
+
+    function valid(obj) {
+        try { return obj !== null && obj !== undefined && obj.isValid === true; } catch (e) { return false; }
+    }
+
+    function fixed(value, width) {
+        var s = String(value);
+        while (s.length < width) { s += " "; }
+        if (s.length > width) { s = s.substring(0, width - 3) + "..."; }
+        return s;
     }
 
     function csv(values) {
@@ -770,13 +910,6 @@ ExtendScript / ECMAScript 3 compatible.
             out.push("\"" + s + "\"");
         }
         return out.join(",");
-    }
-
-    function fixed(value, width) {
-        var s = String(value);
-        while (s.length < width) { s += " "; }
-        if (s.length > width) { s = s.substring(0, width - 3) + "..."; }
-        return s;
     }
 
     function defaultFile(doc, name) {
