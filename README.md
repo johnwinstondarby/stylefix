@@ -1,45 +1,57 @@
 # StyleFix
 
-StyleFix is an Adobe InDesign ExtendScript utility for auditing imported and automatically generated style debris before any styles are deleted or consolidated.
+StyleFix is an Adobe InDesign ExtendScript utility for auditing imported and automatically generated character-style debris before any styles are deleted or consolidated.
 
-## v1.0.1 scope
+## v1.0.2 scope
 
-StyleFix v1.0.1 is read-only and initially focuses on **character styles whose names begin with `Unnamed Style`**. This is the pattern currently observed in the production document after Word content was imported into InDesign.
+StyleFix v1.0.2 is read-only. It expands the audit to the two imported-style families observed in the production document:
 
-For every candidate style, v1.0.1 records:
+- `Unnamed Style *`
+- `Word Imported List Style*`
 
-- style name and ID;
+For every candidate style, the audit records:
+
+- family, style name, and style ID;
 - whether InDesign reports the style as imported;
 - the style it is based on;
 - direct text-style-range usage count;
 - approximate number of characters carrying the style directly;
 - page locations and sample text for direct uses;
+- usage-scan warnings, including the Story ID and error when a story cannot be completely scanned;
 - known document dependencies and indirect references;
-- audit warnings when direct-usage or dependency checks cannot be completed;
-- candidate formatting equivalence to an existing named character style;
-- a conservative deletion-risk classification;
-- a suggested next action.
+- dependency-scan warnings, identifying the dependency check that failed;
+- whether the style contains substantive formatting or is an `EMPTY SHELL` whose audited formatting properties are all `NOTHING`;
+- candidate formatting equivalence to an existing canonical character style when substantive formatting exists;
+- conservative deletion risk;
+- suggested next action.
 
-No style, text, or document structure is changed in v1.0.1.
+No style, text, or document structure is changed in v1.0.2.
 
-### v1.0.1 fix
+## Diagnostic refinements in v1.0.2
 
-v1.0.1 fixes the first-run `Error 21: undefined is not an object` raised while assembling audit rows. The `emptyUsage()` initializer now creates the `samples` array used by CSV/UI reporting. Audit behavior and risk classification are otherwise unchanged.
+The first production audit showed 84 `Unnamed Style *` entries with zero direct use and zero detected dependencies, but each row carried one undifferentiated audit warning. It also showed many `Word Imported List Style*` entries being offered as canonical matches because both style families appeared to contain no substantive formatting.
+
+v1.0.2 makes four refinements:
+
+1. **Usage and dependency warnings are separated.** The CSV now reports `Usage Warning Count`, `Usage Warnings`, `Dependency Warning Count`, and `Dependency Warnings` independently.
+2. **Warning sources are identified.** Usage warnings include the Story ID that could not be completely scanned. Dependency warnings name the failing dependency check and include the InDesign error when available.
+3. **Imported styles are excluded from canonical matching.** `Unnamed Style *`, `Word Imported List Style*`, any `Word Imported ...` style, and any style InDesign explicitly reports as imported cannot serve as canonical replacement targets.
+4. **Empty-shell styles do not participate in canonical matching.** If every audited character-formatting property is `NOTHING`, the style is classified as `EMPTY SHELL` and no equivalent canonical style is proposed.
 
 ## Risk model
 
 | Risk | Meaning |
 | --- | --- |
-| `LOW` | No direct text usage, no known dependency, and the dependency scan completed without warnings. Candidate for guarded deletion in a later version. |
-| `MEDIUM` | One or more dependency checks could not be completed. Manual review is required before deletion. |
-| `HIGH` | The style is directly applied to text or referenced by another document construct, and no single canonical equivalent was found. |
-| `REPLACE` | The style is used or referenced and exactly one existing named character style has the same audited formatting fingerprint. Candidate for replacement followed by deletion, subject to field validation. |
+| `LOW` | No direct text usage, no known dependency, and no usage or dependency scan warning. Candidate for guarded deletion in a later version. |
+| `MEDIUM` | No confirmed use or dependency, but one or more audit checks were incomplete. Review the named warning before deletion. |
+| `HIGH` | The style is directly applied to text or referenced by another document construct, or a used/referenced style has incomplete audit coverage. |
+| `REPLACE` | The style is used or referenced and exactly one non-imported, substantive canonical character style has the same audited formatting fingerprint. Candidate for replacement followed by deletion after field validation. |
 
-`LOW` deliberately means more than unused. StyleFix requires both zero direct use and zero known dependencies before assigning LOW risk.
+`LOW` deliberately means more than unused. StyleFix requires zero direct use, zero known dependencies, and complete audit coverage.
 
 ## Dependency coverage
 
-v1.0 checks common InDesign character-style reference paths, including:
+v1.0.2 checks common InDesign character-style reference paths, including:
 
 - other character styles using the candidate through `basedOn`;
 - paragraph-style drop caps;
@@ -55,17 +67,24 @@ v1.0 checks common InDesign character-style reference paths, including:
 - index-generation character styles;
 - index page-number style overrides.
 
-If a direct-usage scan or one of these dependency checks cannot be completed, an otherwise unused/unreferenced candidate is prevented from receiving LOW risk and is classified MEDIUM instead. A style with confirmed usage or dependencies remains HIGH unless it qualifies for a verified replacement candidate.
+Any failed check is reported by name instead of being collapsed into one generic warning count.
 
 ## Canonical-style matching
 
-StyleFix compares each unnamed character style against existing named character styles using a formatting fingerprint composed from key character attributes such as font, font style, point size, leading, tracking, position, scaling, baseline shift, fill/stroke, and related character settings.
+Canonical replacement candidates must now be:
 
-A match is a **candidate equivalence**, not an automatic replacement decision. v1.0 reports it for review. Remediation is deferred until production results establish that the comparison is sufficiently reliable.
+- named character styles outside the two debris families;
+- not named `Word Imported ...`;
+- not explicitly reported by InDesign as imported; and
+- substantively formatted.
+
+StyleFix compares substantive candidates using key character attributes such as font, font style, point size, leading, tracking, position, scaling, baseline shift, fill/stroke, and related character settings.
+
+A canonical match remains diagnostic evidence only. v1.0.2 performs no replacement.
 
 ## UI
 
-The v1.0 palette provides:
+The palette provides:
 
 - **Rescan**
 - **Locate First Use**
@@ -73,11 +92,11 @@ The v1.0 palette provides:
 - **Save CSV**
 - **Close**
 
-Rows are sorted with higher-risk findings first.
+Rows remain single-select in the audit release. Multi-select is reserved for the remediation phase.
 
 ## Planned remediation
 
-After field validation, a remediation release can add the multi-select pattern used by the other InDesign QA utilities:
+After the refined production audit establishes deletion safety, the remediation release will use the same multi-select pattern as the other InDesign QA utilities:
 
 - Ctrl-click and Shift-click selection;
 - **Delete Selected Safe Styles** for re-verified LOW-risk candidates;
