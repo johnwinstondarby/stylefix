@@ -1,10 +1,11 @@
 
 /*
-StyleFix v1.0.4
+StyleFix v1.0.5
 Read-only imported-style debris audit.
 
-v1.0.4 is hardened for the repository canary gate:
-- recursive direct-use scan: stories, table cells, nested tables, footnotes, endnotes;
+v1.0.5 is hardened for the repository canary gate:
+- recursive direct-use scan: stories, table cells, nested tables, footnotes, endnote stories;
+- endnotes are discovered through Story.isEndnoteStory rather than generic container.endnotes probes;
 - page/overset reporting across unusual story locations;
 - one-pass dependency indexing;
 - EPUB/HTML style export-tag-map inspection;
@@ -19,8 +20,8 @@ ExtendScript / ECMAScript 3 compatible.
 */
 
 (function () {
-    var VERSION = "1.0.4";
-    var RELEASE_TAG = "v1.0.4";
+    var VERSION = "1.0.5";
+    var RELEASE_TAG = "v1.0.5";
     var UNNAMED_RE = /^Unnamed Style(?:\s|$)/i;
     var WORD_LIST_RE = /^Word Imported List Style/i;
     var FAMILY_TEXT = "Unnamed Style * | Word Imported List Style*";
