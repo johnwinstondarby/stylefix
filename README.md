@@ -2,11 +2,11 @@
 
 StyleFix is an Adobe InDesign ExtendScript utility for auditing imported and automatically generated style debris before any styles are deleted or consolidated.
 
-## v1.0 scope
+## v1.0.1 scope
 
-StyleFix v1.0 is read-only and initially focuses on **character styles whose names begin with `Unnamed Style`**. This is the pattern currently observed in the production document after Word content was imported into InDesign.
+StyleFix v1.0.1 is read-only and initially focuses on **character styles whose names begin with `Unnamed Style`**. This is the pattern currently observed in the production document after Word content was imported into InDesign.
 
-For every candidate style, v1.0 records:
+For every candidate style, v1.0.1 records:
 
 - style name and ID;
 - whether InDesign reports the style as imported;
@@ -20,7 +20,11 @@ For every candidate style, v1.0 records:
 - a conservative deletion-risk classification;
 - a suggested next action.
 
-No style, text, or document structure is changed in v1.0.
+No style, text, or document structure is changed in v1.0.1.
+
+### v1.0.1 fix
+
+v1.0.1 fixes the first-run `Error 21: undefined is not an object` raised while assembling audit rows. The `emptyUsage()` initializer now creates the `samples` array used by CSV/UI reporting. Audit behavior and risk classification are otherwise unchanged.
 
 ## Risk model
 
