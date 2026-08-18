@@ -84,7 +84,7 @@
             errors:0, errorDetails:[], visited:{}
         };
         var stories = collectionElements(safePropertyObject(doc, "stories"));
-        var endnotes, i, story;
+        var i, story, isEndnote;
 
         for (i = 0; i < candidates.length; i++) {
             audit.map[styleKey(candidates[i])] = emptyUsage();
@@ -93,26 +93,25 @@
         for (i = 0; i < stories.length; i++) {
             story = stories[i];
             if (!valid(story)) { continue; }
-            try {
-                if (story.isEndnoteStory === true) { continue; }
-            } catch (eIsEndnote) {}
+
+            isEndnote = false;
+            try { isEndnote = story.isEndnoteStory === true; } catch (eIsEndnote) {}
+
             scanTextContainer(
                 story,
-                "Story " + safeProperty(story, "id", "#" + i),
-                audit, "STORY", 0, true
+                (isEndnote ? "Endnote story " : "Story ") + safeProperty(story, "id", "#" + i),
+                audit,
+                isEndnote ? "ENDNOTE" : "STORY",
+                0,
+                true
             );
-        }
-
-        endnotes = collectionElements(safePropertyObject(doc, "endnotes"));
-        for (i = 0; i < endnotes.length; i++) {
-            scanNoteObject(endnotes[i], "Endnote " + i, audit, "ENDNOTE", 0);
         }
 
         return audit;
     }
 
     function scanTextContainer(container, label, audit, context, tableDepth, scanNotes) {
-        var key, ranges, tables, notes, endnotes, i;
+        var key, ranges, tables, notes, i;
         if (container === null || container === undefined || !valid(container)) { return; }
 
         key = objectKey(container);
@@ -146,13 +145,6 @@
             } catch (eFootnotes) {
                 addGlobalAuditError(audit, label + " footnotes", eFootnotes);
             }
-
-            try {
-                endnotes = collectionElements(container.endnotes);
-                for (i = 0; i < endnotes.length; i++) {
-                    scanNoteObject(endnotes[i], label + " endnote " + i, audit, "ENDNOTE", tableDepth);
-                }
-            } catch (eEndnotes) {}
         }
     }
 
