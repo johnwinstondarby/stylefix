@@ -37,6 +37,15 @@ CRITICAL_DIRECT = {
     "textContainers",
 }
 
+# These are StyleFix-owned evidence/state objects, not InDesign DOM hosts. Their
+# field names deliberately mirror the DOM surfaces they summarize. The direct
+# access guard must not confuse evidence fields such as inv.endnoteTextFrames
+# with host-object access such as doc.endnoteTextFrames.
+INTERNAL_RECEIVERS = {
+    "inv", "inventory", "counts", "row", "usage", "scanMeta", "result", "audit",
+    "capAudit", "contractAudit", "depAudit", "semanticAudit", "bookAudit", "state",
+}
+
 FORBIDDEN = [
     (re.compile(r'\bindexOptions\b'), "historical wrong Document.indexOptions name"),
     (re.compile(r'"language"'), "historical wrong fingerprint property language"),
@@ -129,10 +138,11 @@ def main() -> int:
         pat = re.compile(r'(?P<recv>[A-Za-z_$][A-Za-z0-9_$]*|\])\.' + re.escape(name) + r'\b')
         for match in pat.finditer(code_patch):
             recv = match.group("recv")
-            if recv in {"inv", "counts", "row", "usage", "scanMeta", "result", "audit"}:
+            if recv in INTERNAL_RECEIVERS:
                 continue
             errors.append(
-                f"patch:{line_of(code_patch, match.start())}: direct DOM access .{name}; use contract accessor"
+                f"patch:{line_of(code_patch, match.start())}: direct DOM access .{name} "
+                f"on receiver {recv!r}; use contract accessor"
             )
 
     for name in ["indexGenerationOptions", "appliedLanguage", "styleExportTagMaps"]:
@@ -164,6 +174,8 @@ def main() -> int:
 
     # Temporal initialization gate. Function declarations are hoisted in
     # ExtendScript, while registry assignments/domRegister calls are not.
+    # The inherited base bootstrap must therefore be removed before eval and
+    # reinserted after contract + v1.0.8 patch initialization.
     remove_pos = loader.find("code = code.replace(bootstrapNeedle,bootstrapReplacement);")
     append_pos = loader.find('code += "\\n" + patch106 + "\\n" + contract108 + "\\n" + patch108Pieces.join("\\n");')
     boot_pos = loader.find("__STYLEFIX_BOOT_STAGE = 'buildUI'")
