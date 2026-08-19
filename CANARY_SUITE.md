@@ -7,12 +7,13 @@ v1.0.8 is audit-only. The production manuscript is outside the acceptance harnes
 For each suite member, use this order:
 
 1. Build log and direct-object builder census.
-2. Independent IDML verification where applicable.
-3. StyleFix CSV.
-4. StyleFix Diagnostic.
-5. Manual artifact review against the applicable expected-results matrix.
+2. Independent correction verification where a documented builder-readback defect applies.
+3. Independent IDML verification where applicable.
+4. StyleFix CSV.
+5. StyleFix Diagnostic.
+6. Manual artifact review against the applicable expected-results matrix.
 
-If an earlier step fails, stop. Later outputs are not release evidence for that fixture.
+If an earlier step fails, stop unless the suite explicitly defines a correction verifier for that exact failure. Later outputs are not release evidence for an unrelated failed control.
 
 ## Core fixture
 
@@ -38,6 +39,12 @@ It builds:
 - L01: clean empty-shell LOW control.
 
 The builder records the actual font pair and color pair selected on that machine. Both pairs must produce distinct read-back values before the fixture is valid. The clean supplemental fixture is expected to produce no MEDIUM results.
+
+### L01 builder-readback correction
+
+The original supplemental builder's `isEmptyShell()` check compares direct CharacterStyle property read-back to `NothingEnum.NOTHING`. In InDesign 21.5.1, a newly created empty CharacterStyle can serialize with no explicit formatting while one or more direct property reads do not compare equal to `NothingEnum.NOTHING`. This can produce `FAIL VERIFY L01` even when the generated L01 style is structurally empty.
+
+When the only builder failure is L01 with `emptyShell=NO;exportMaps=0`, run `canary/coverage/VerifyCoverage108_L01.jsx` against the generated supplemental INDD. The correction verifier compares L01 against E01 and a fresh transient empty CharacterStyle across the full StyleFix fingerprint surface and verifies zero export maps. A PASS replaces only the failed L01 builder assertion. All other builder controls must already be PASS.
 
 Expected results: `canary/expected/CANARY_SUPPLEMENTAL_EXPECTED_v1.0.8.csv`.
 
