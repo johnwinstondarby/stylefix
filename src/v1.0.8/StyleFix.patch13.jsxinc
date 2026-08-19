@@ -1,0 +1,252 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/13 */
+
+/*
+Stage-aware ScriptUI progress monitor.
+
+Instrumentation only:
+- does not alter audit, dependency, fingerprint, export-map, authorization, or
+  classification logic;
+- adds an overall native progressbar plus a stage-color accent and status text;
+- derives stage transitions from existing StyleFix status messages;
+- records elapsed time visually without adding cancellation or mutation paths.
+
+Stage accents:
+- BLUE: inventory / direct-use scan
+- VIOLET: dependency analysis
+- GOLD: candidate classification / verification
+- GREEN: complete
+- RED: failed scan
+*/
+
+var styleFixProgress108 = {
+    startedAt:0,
+    lastPaintAt:0,
+    running:false,
+    failed:false,
+    stage:"Ready",
+    percent:0,
+    current:0,
+    total:0,
+    color:"BLUE"
+};
+
+var styleFixBuildUIBeforeProgress108 = buildUI;
+var styleFixStatusBeforeProgress108 = status;
+var styleFixScanBeforeProgress108 = scan;
+
+buildUI = function () {
+    styleFixBuildUIBeforeProgress108();
+    styleFixAttachProgressUI108();
+};
+
+status = function (text) {
+    styleFixStatusBeforeProgress108(text);
+    styleFixProgressFromStatus108(text);
+};
+
+scan = function () {
+    styleFixProgressStart108();
+    styleFixScanBeforeProgress108();
+    if (styleFixProgress108.failed !== true && styleFixProgress108.running === true) {
+        styleFixProgressComplete108();
+    }
+};
+
+function styleFixAttachProgressUI108() {
+    var header;
+    try {
+        ui.progressPanel108 = ui.win.add("panel", undefined, "Progress");
+        ui.progressPanel108.orientation = "column";
+        ui.progressPanel108.alignChildren = ["fill","top"];
+        ui.progressPanel108.margins = [10,12,10,10];
+        ui.progressPanel108.spacing = 5;
+
+        header = ui.progressPanel108.add("group");
+        header.orientation = "row";
+        header.alignChildren = ["left","center"];
+
+        ui.progressStage108 = header.add("statictext", undefined, "Ready");
+        ui.progressStage108.preferredSize = [260,22];
+        try {
+            ui.progressStage108.graphics.font = ScriptUI.newFont(
+                ui.progressStage108.graphics.font.name,"BOLD",11
+            );
+        } catch (ignoreFont) {}
+
+        ui.progressCount108 = header.add("statictext", undefined, "");
+        ui.progressCount108.preferredSize = [190,22];
+
+        ui.progressElapsed108 = header.add("statictext", undefined, "Elapsed 0:00");
+        ui.progressElapsed108.alignment = ["right","center"];
+        ui.progressElapsed108.preferredSize = [170,22];
+
+        ui.progressAccent108 = ui.progressPanel108.add("panel", undefined, "");
+        ui.progressAccent108.preferredSize = [1240,6];
+        ui.progressAccent108.minimumSize = [300,6];
+        ui.progressAccent108.maximumSize = [5000,6];
+
+        ui.progressBar108 = ui.progressPanel108.add("progressbar", undefined, 0, 100);
+        ui.progressBar108.preferredSize = [1240,16];
+        ui.progressBar108.minimumSize = [300,16];
+
+        ui.progressOperation108 = ui.progressPanel108.add("statictext", undefined, "Ready.");
+        ui.progressOperation108.preferredSize = [1240,22];
+
+        styleFixSetProgressColor108("BLUE");
+        try { ui.win.layout.layout(true); } catch (ignoreLayout) {}
+    } catch (ignoreProgressUI) {
+        /* Progress UI is advisory. A platform-specific ScriptUI limitation must
+           never block the audit itself. */
+    }
+}
+
+function styleFixProgressStart108() {
+    styleFixProgress108.startedAt = (new Date()).getTime();
+    styleFixProgress108.lastPaintAt = 0;
+    styleFixProgress108.running = true;
+    styleFixProgress108.failed = false;
+    styleFixProgress108.stage = "Inventory / fingerprint";
+    styleFixProgress108.percent = 5;
+    styleFixProgress108.current = 0;
+    styleFixProgress108.total = 0;
+    styleFixProgress108.color = "BLUE";
+    styleFixPaintProgress108("Preparing style inventory and fingerprint schema...",true);
+}
+
+function styleFixProgressFromStatus108(text) {
+    var value = String(text || ""), match, current, total, percent;
+
+    if (/^Scan failed:/i.test(value)) {
+        styleFixProgress108.failed = true;
+        styleFixProgress108.running = false;
+        styleFixProgress108.stage = "Failed";
+        styleFixProgress108.percent = 100;
+        styleFixProgress108.current = 0;
+        styleFixProgress108.total = 0;
+        styleFixProgress108.color = "RED";
+        styleFixPaintProgress108(value,true);
+        return;
+    }
+
+    if (/^Scanning direct usage/i.test(value)) {
+        styleFixProgress108.stage = "Usage traversal";
+        styleFixProgress108.percent = 28;
+        styleFixProgress108.current = 0;
+        styleFixProgress108.total = 0;
+        styleFixProgress108.color = "BLUE";
+        styleFixPaintProgress108(value,true);
+        return;
+    }
+
+    if (/^Indexing dependencies/i.test(value)) {
+        styleFixProgress108.stage = "Dependency analysis";
+        styleFixProgress108.percent = 52;
+        styleFixProgress108.current = 0;
+        styleFixProgress108.total = 0;
+        styleFixProgress108.color = "VIOLET";
+        styleFixPaintProgress108(value,true);
+        return;
+    }
+
+    match = value.match(/^Auditing\s+(\d+)\s+of\s+(\d+):/i);
+    if (match) {
+        current = Number(match[1]);
+        total = Number(match[2]);
+        percent = 60;
+        if (total > 0) {
+            percent += Math.floor((current / total) * 36);
+        }
+        if (percent > 96) { percent = 96; }
+        styleFixProgress108.stage = "Classification / verification";
+        styleFixProgress108.percent = percent;
+        styleFixProgress108.current = current;
+        styleFixProgress108.total = total;
+        styleFixProgress108.color = "GOLD";
+        styleFixPaintProgress108(value,false);
+        return;
+    }
+
+    if (/^Scan complete\./i.test(value)) {
+        styleFixProgress108.running = false;
+        styleFixProgress108.stage = "Complete";
+        styleFixProgress108.percent = 100;
+        styleFixProgress108.current = styleFixProgress108.total;
+        styleFixProgress108.color = "GREEN";
+        styleFixPaintProgress108(value,true);
+        return;
+    }
+
+    if (styleFixProgress108.running === true) {
+        styleFixPaintProgress108(value,false);
+    }
+}
+
+function styleFixProgressComplete108() {
+    styleFixProgress108.running = false;
+    styleFixProgress108.stage = "Complete";
+    styleFixProgress108.percent = 100;
+    styleFixProgress108.current = styleFixProgress108.total;
+    styleFixProgress108.color = "GREEN";
+    styleFixPaintProgress108("Scan complete.",true);
+}
+
+function styleFixPaintProgress108(operation,force) {
+    var now = (new Date()).getTime();
+    var elapsed, countText = "";
+
+    if (force !== true && now - styleFixProgress108.lastPaintAt < 75) { return; }
+    styleFixProgress108.lastPaintAt = now;
+
+    elapsed = styleFixElapsedText108(now - styleFixProgress108.startedAt);
+    if (styleFixProgress108.total > 0) {
+        countText = String(styleFixProgress108.current) + " / " + String(styleFixProgress108.total);
+    }
+
+    try { if (ui.progressStage108) { ui.progressStage108.text = styleFixProgress108.stage; } } catch (ignoreStage) {}
+    try { if (ui.progressCount108) { ui.progressCount108.text = countText; } } catch (ignoreCount) {}
+    try { if (ui.progressElapsed108) { ui.progressElapsed108.text = "Elapsed " + elapsed; } } catch (ignoreElapsed) {}
+    try {
+        if (ui.progressBar108) {
+            ui.progressBar108.value = styleFixProgress108.percent;
+        }
+    } catch (ignoreBar) {}
+    try { if (ui.progressOperation108) { ui.progressOperation108.text = String(operation || ""); } } catch (ignoreOp) {}
+
+    styleFixSetProgressColor108(styleFixProgress108.color);
+    try { if (ui.win) { ui.win.update(); } } catch (ignoreUpdate) {}
+}
+
+function styleFixSetProgressColor108(key) {
+    var color = styleFixProgressColor108(key), g;
+
+    try {
+        if (ui.progressStage108) {
+            g = ui.progressStage108.graphics;
+            g.foregroundColor = g.newPen(g.PenType.SOLID_COLOR,color,1);
+        }
+    } catch (ignoreStageColor) {}
+
+    try {
+        if (ui.progressAccent108) {
+            g = ui.progressAccent108.graphics;
+            g.backgroundColor = g.newBrush(g.BrushType.SOLID_COLOR,color);
+        }
+    } catch (ignoreAccentColor) {}
+}
+
+function styleFixProgressColor108(key) {
+    if (key === "VIOLET") { return [0.48,0.28,0.82,1]; }
+    if (key === "GOLD") { return [0.82,0.58,0.12,1]; }
+    if (key === "GREEN") { return [0.20,0.62,0.32,1]; }
+    if (key === "RED") { return [0.78,0.18,0.18,1]; }
+    return [0.18,0.45,0.82,1];
+}
+
+function styleFixElapsedText108(milliseconds) {
+    var seconds, minutes, remainder;
+    if (milliseconds < 0 || isNaN(milliseconds)) { milliseconds = 0; }
+    seconds = Math.floor(milliseconds / 1000);
+    minutes = Math.floor(seconds / 60);
+    remainder = seconds - (minutes * 60);
+    return String(minutes) + ":" + (remainder < 10 ? "0" : "") + String(remainder);
+}
