@@ -37,9 +37,6 @@ function domInapplicableError108(message) {
         s.indexOf("not valid for a root style") >= 0;
 }
 
-/* Five-state contract model. Internal null-object reads keep NO_INSTANCE so
-   traversal helpers can continue to distinguish missing representatives; the
-   contract audit normalizes that state to NO_APPLICABLE_INSTANCE. */
 domTryGet108 = function (obj, code) {
     var entry = domEntry108(code), value, n = 0, message = "";
     if (entry.kind !== "property") {
@@ -95,8 +92,7 @@ domTryMethod108 = function (obj, code) {
 };
 
 function contractStateNonBlocking108(state) {
-    return state === "SUPPORTED" || state === "NOT_APPLICABLE" ||
-        state === "NO_APPLICABLE_INSTANCE";
+    return state === "SUPPORTED" || state === "NOT_APPLICABLE" || state === "NO_APPLICABLE_INSTANCE";
 }
 
 function findApplicableBasedOnRepresentative108(allChar) {
@@ -104,9 +100,7 @@ function findApplicableBasedOnRepresentative108(allChar) {
     for (i = 0; i < allChar.length; i++) {
         if (!valid(allChar[i])) { continue; }
         p = domTryGet108(allChar[i],"STYLE_BASED_ON");
-        if (p.state === "SUPPORTED") {
-            return {style:allChar[i],probe:p};
-        }
+        if (p.state === "SUPPORTED") { return {style:allChar[i],probe:p}; }
     }
     return null;
 }
@@ -146,9 +140,7 @@ function recomputeContractGateAccepted108(audit) {
         if (item.state === "FAILED" || item.state === "NOT_EXPOSED") {
             audit.blockLow = true;
             audit.blockReasons.push(item.code + "=" + item.state);
-            if (item.role === "USAGE" || item.role === "STYLE" || item.role === "COLLECTION") {
-                audit.fatal = true;
-            }
+            if (item.role === "USAGE" || item.role === "STYLE" || item.role === "COLLECTION") { audit.fatal = true; }
         }
     }
 }
@@ -157,22 +149,14 @@ var probeDomContract108BeforeAcceptance = probeDomContract108;
 probeDomContract108 = function (doc,allChar,allPara,candidates) {
     var audit = probeDomContract108BeforeAcceptance(doc,allChar,allPara,candidates);
     var rep, item, rh;
-
-    /* D07 supplies a positive, non-root basedOn representative when present. */
     rep = findApplicableBasedOnRepresentative108(allChar);
     item = audit.byCode.STYLE_BASED_ON;
     if (item) {
         if (rep !== null) {
             item.state = "SUPPORTED";
             item.note = "Applicable non-root character-style representative: " + styleName(rep.style);
-        } else if (item.state === "FAILED") {
-            item.state = "NOT_APPLICABLE";
-        }
+        } else if (item.state === "FAILED") { item.state = "NOT_APPLICABLE"; }
     }
-
-    /* A MATCH_CHARACTER_STYLE variable is the only positive representative for
-       the running-header character-style preference. Without one, absence is an
-       evidence state, not a capability failure. */
     rh = findRunningHeaderRepresentative108(doc);
     item = audit.byCode.VARIABLE_OPTIONS;
     if (item) {
@@ -197,14 +181,10 @@ probeDomContract108 = function (doc,allChar,allPara,candidates) {
             item.note = "No MATCH_CHARACTER_STYLE variable supplied an applicable preference object.";
         }
     }
-
     recomputeContractGateAccepted108(audit);
     return audit;
 };
 
-/* Array-like values such as parentTextFrames do not necessarily expose item().
-   Prefer item() for InDesign collections and fall back to numeric indexing only
-   when the value is genuinely array-like. */
 collectionItems108 = function (collection,label,audit,strict) {
     var result = {items:[],length:0,count:null,complete:true,detail:""};
     var len, i, item, errors = [], itemFn = null;
@@ -233,9 +213,7 @@ collectionItems108 = function (collection,label,audit,strict) {
                 errors.push("count mismatch length=" + result.length + " count=" + result.count);
             }
         }
-    } catch (eCount) {
-        errors.push("count() unavailable: " + errorSummary(eCount));
-    }
+    } catch (eCount) { errors.push("count() unavailable: " + errorSummary(eCount)); }
     for (i = 0; i < result.length; i++) {
         item = null;
         try {
@@ -257,12 +235,9 @@ collectionItems108 = function (collection,label,audit,strict) {
     return result;
 };
 
-/* Endnote authorization follows the content path the scanner really uses:
-   Document.stories. Frame-to-story linkage remains diagnostic corroboration. */
 addEndnoteCoverage108 = function (audit,doc,stories,inv,frameProbe) {
     var classification = audit.byCode.ENDNOTE_CLASSIFICATION;
     var note = "", frames = [], storyKeys = {}, i, parentStory, key, unresolved = 0;
-
     if (inv.endnoteStories > 0 && classification && classification.state === "SUPPORTED") {
         if (frameProbe.state === "SUPPORTED") {
             frames = collectionItems108(frameProbe.value,"Document.endnoteTextFrames",null,false).items;
@@ -277,31 +252,22 @@ addEndnoteCoverage108 = function (audit,doc,stories,inv,frameProbe) {
                 if (key === "" || storyKeys[key] !== true) { unresolved++; }
             }
             note = "Endnote stories are positively inventoried in Document.stories and are scanned directly.";
-            if (unresolved > 0) {
-                note += " Diagnostic only: " + unresolved + " endnote frame-to-story link(s) did not resolve.";
-            }
+            if (unresolved > 0) { note += " Diagnostic only: " + unresolved + " endnote frame-to-story link(s) did not resolve."; }
         } else {
             note = "Endnote stories are positively inventoried in Document.stories and are scanned directly; endnoteTextFrames=" + frameProbe.state + ".";
         }
-        addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
-            "SUPPORTED",inv.endnoteStories,true,note);
+        addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage","SUPPORTED",inv.endnoteStories,true,note);
         return;
     }
-
     if (inv.endnoteStories === 0 && inv.endnoteTextFrames === 0) {
-        addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
-            "NO_INSTANCE",0,true,"No endnote instances were inventoried.");
+        addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage","NO_INSTANCE",0,true,"No endnote instances were inventoried.");
         return;
     }
-
-    addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
-        "FAILED",Math.max(inv.endnoteStories,inv.endnoteTextFrames),true,
-        "Endnote instances exist but no endnote story could be positively classified in Document.stories.");
+    addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage","FAILED",Math.max(inv.endnoteStories,inv.endnoteTextFrames),true,"Endnote instances exist but no endnote story could be positively classified in Document.stories.");
 };
 
 function benignDependencyState108(state) {
-    return state === "NOT_APPLICABLE" || state === "NO_INSTANCE" ||
-        state === "NO_APPLICABLE_INSTANCE";
+    return state === "NOT_APPLICABLE" || state === "NO_INSTANCE" || state === "NO_APPLICABLE_INSTANCE";
 }
 
 blockDependencySurface108 = function (audit,label,state,note) {
@@ -322,20 +288,10 @@ recordDependencyContract108 = function (audit,obj,contractCode,detail) {
         return;
     }
     if (benignDependencyState108(p.state)) { return; }
-
-    /* appliedCharacterStyle is subtype-specific. Its absence on a non-running-
-       header preference object is not evidence that the required running-header
-       surface is missing from the build. The DOM contract supplies the positive
-       proof when an applicable MATCH_CHARACTER_STYLE variable exists. */
     if (contractCode === "VARIABLE_APPLIED_STYLE" && p.state === "NOT_EXPOSED") { return; }
-
-    blockDependencySurface108(audit,domEntry108(contractCode).surface + "." +
-        domEntry108(contractCode).name,p.state,p.note);
+    blockDependencySurface108(audit,domEntry108(contractCode).surface + "." + domEntry108(contractCode).name,p.state,p.note);
 };
 
-/* Deterministic scratch colors make object-valued fingerprint discrimination
-   falsifiable without depending on whatever built-in swatches a new document
-   happens to expose. */
 fingerprintDiscriminationProbe108 = function () {
     var result = {ok:false,detail:"",tests:[],fontA:"",fontB:"",colorA:"",colorB:"",languageA:"",languageB:""};
     var pd = null, styles, a, b, colorsProbe, colors, addName, ca, cb, fonts, langs, pair;
@@ -344,16 +300,10 @@ fingerprintDiscriminationProbe108 = function () {
         styles = pd[domEntry108("DOC_CHARACTER_STYLES").name];
         a = styles.add({name:"StyleFix Fingerprint Probe A"});
         b = styles.add({name:"StyleFix Fingerprint Probe B"});
-
         a.pointSize = 11; b.pointSize = 12;
-        addFingerprintSemanticTest108(result,"pointSize",
-            normalizedProperty(a,"pointSize") !== normalizedProperty(b,"pointSize"),
-            normalizedProperty(a,"pointSize"),normalizedProperty(b,"pointSize"));
+        addFingerprintSemanticTest108(result,"pointSize",normalizedProperty(a,"pointSize") !== normalizedProperty(b,"pointSize"),normalizedProperty(a,"pointSize"),normalizedProperty(b,"pointSize"));
         a.tracking = 0; b.tracking = 25;
-        addFingerprintSemanticTest108(result,"tracking",
-            normalizedProperty(a,"tracking") !== normalizedProperty(b,"tracking"),
-            normalizedProperty(a,"tracking"),normalizedProperty(b,"tracking"));
-
+        addFingerprintSemanticTest108(result,"tracking",normalizedProperty(a,"tracking") !== normalizedProperty(b,"tracking"),normalizedProperty(a,"tracking"),normalizedProperty(b,"tracking"));
         colorsProbe = domTryGet108(pd,"DOC_COLORS");
         if (colorsProbe.state !== "SUPPORTED") { throw new Error("Document.colors=" + colorsProbe.state); }
         colors = colorsProbe.value;
@@ -361,26 +311,17 @@ fingerprintDiscriminationProbe108 = function () {
         if (typeof colors[addName] !== "function") { throw new Error("Colors.add is unavailable"); }
         ca = colors[addName]({name:"StyleFix Probe Color A",model:ColorModel.PROCESS,space:ColorSpace.RGB,colorValue:[16,64,128]});
         cb = colors[addName]({name:"StyleFix Probe Color B",model:ColorModel.PROCESS,space:ColorSpace.RGB,colorValue:[224,32,16]});
-
-        a.fillColor = ca; b.fillColor = cb;
+        a[domEntry108("FP_FILL_COLOR").name] = ca; b[domEntry108("FP_FILL_COLOR").name] = cb;
         result.colorA = normalizedProperty(a,"fillColor");
         result.colorB = normalizedProperty(b,"fillColor");
-        addFingerprintSemanticTest108(result,"fillColor",result.colorA !== "NOTHING" &&
-            result.colorB !== "NOTHING" && result.colorA !== result.colorB,result.colorA,result.colorB);
-
-        a.strokeColor = ca; b.strokeColor = cb;
-        addFingerprintSemanticTest108(result,"strokeColor",
-            normalizedProperty(a,"strokeColor") !== "NOTHING" &&
-            normalizedProperty(b,"strokeColor") !== "NOTHING" &&
-            normalizedProperty(a,"strokeColor") !== normalizedProperty(b,"strokeColor"),
-            normalizedProperty(a,"strokeColor"),normalizedProperty(b,"strokeColor"));
-
+        addFingerprintSemanticTest108(result,"fillColor",result.colorA !== "NOTHING" && result.colorB !== "NOTHING" && result.colorA !== result.colorB,result.colorA,result.colorB);
+        a[domEntry108("FP_STROKE_COLOR").name] = ca; b[domEntry108("FP_STROKE_COLOR").name] = cb;
+        addFingerprintSemanticTest108(result,"strokeColor",normalizedProperty(a,"strokeColor") !== "NOTHING" && normalizedProperty(b,"strokeColor") !== "NOTHING" && normalizedProperty(a,"strokeColor") !== normalizedProperty(b,"strokeColor"),normalizedProperty(a,"strokeColor"),normalizedProperty(b,"strokeColor"));
         fonts = collectionItems108(app[domEntry108("APP_FONTS").name],"Application.fonts",null,false).items;
         pair = findAssignableStylePair108(a,b,"appliedFont",fonts);
         if (pair === null) { throw new Error("Could not establish two distinguishable appliedFont values."); }
         result.fontA = pair.aName; result.fontB = pair.bName;
         addFingerprintSemanticTest108(result,"appliedFont",pair.distinct,pair.aValue,pair.bValue);
-
         try {
             langs = collectionItems108(app[domEntry108("APP_LANGUAGES").name],"Application.languagesWithVendors",null,false).items;
             pair = findAssignableStylePair108(a,b,"appliedLanguage",langs);
@@ -389,7 +330,6 @@ fingerprintDiscriminationProbe108 = function () {
                 addFingerprintSemanticTest108(result,"appliedLanguage",pair.distinct,pair.aValue,pair.bValue);
             }
         } catch (ignoreLanguageProbe) {}
-
         result.ok = fingerprintTestsPass108(result.tests);
         result.detail = result.ok ? "critical fingerprint dimensions discriminate" : "one or more discrimination tests failed";
     } catch (e) {
