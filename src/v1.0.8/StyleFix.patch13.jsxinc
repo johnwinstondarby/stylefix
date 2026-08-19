@@ -7,10 +7,12 @@ Instrumentation only:
 - does not alter audit, dependency, fingerprint, export-map, authorization, or
   classification logic;
 - uses a standalone modeless palette so progress is visible while the main
-  StyleFix results window is still hidden during the initial scan;
+  StyleFix results window is hidden during the initial scan;
 - adds an overall native progressbar plus a stage-color accent and status text;
-- derives stage transitions from existing StyleFix status messages;
-- records elapsed time visually without adding cancellation or mutation paths.
+- derives major stage transitions from existing StyleFix status messages;
+- adds throttled inner-loop checkpoints for story traversal, text ranges, and
+  dependency-reference inspection so long phases repaint more often;
+- adds no sleeps, artificial delays, cancellation, or mutation paths.
 
 Stage accents:
 - BLUE: inventory / direct-use scan
@@ -30,12 +32,19 @@ var styleFixProgress108 = {
     current:0,
     total:0,
     color:"BLUE",
-    mainVisibleAtStart:false
+    mainVisibleAtStart:false,
+    usageTotal:0,
+    usageCurrent:0,
+    usageRanges:0,
+    dependencyChecks:0
 };
 
 var styleFixBuildUIBeforeProgress108 = buildUI;
 var styleFixStatusBeforeProgress108 = status;
 var styleFixScanBeforeProgress108 = scan;
+var styleFixScanTextContainerBeforeProgress108 = scanTextContainer;
+var styleFixRecordUsageRangeBeforeProgress108 = recordUsageRange;
+var styleFixRecordDependencyRefBeforeProgress108 = recordDependencyRef;
 
 buildUI = function () {
     styleFixBuildUIBeforeProgress108();
@@ -65,6 +74,72 @@ scan = function () {
     if (styleFixProgress108.mainVisibleAtStart === true) {
         styleFixCloseProgressWindow108();
     }
+};
+
+/* Top-level story checkpoints. Nested tables and notes still run through the
+   original scanner, but they do not inflate the story denominator. */
+scanTextContainer = function (container,label,audit,context,tableDepth,scanNotes) {
+    var isTop = styleFixIsTopLevelStory108(label,context,tableDepth);
+    if (isTop && styleFixProgress108.running === true &&
+        styleFixProgress108.stage === "Usage traversal") {
+        styleFixProgress108.usageCurrent++;
+        styleFixProgress108.current = styleFixProgress108.usageCurrent;
+        styleFixProgress108.total = styleFixProgress108.usageTotal;
+        styleFixProgress108.percent = styleFixUsagePercent108(
+            styleFixProgress108.usageCurrent,
+            styleFixProgress108.usageTotal
+        );
+        styleFixPaintProgress108(
+            "Scanning story " + styleFixProgress108.usageCurrent +
+            (styleFixProgress108.usageTotal > 0 ?
+                " of " + styleFixProgress108.usageTotal : "") + "...",
+            true
+        );
+    }
+    return styleFixScanTextContainerBeforeProgress108(
+        container,label,audit,context,tableDepth,scanNotes
+    );
+};
+
+/* Text-range heartbeat. This catches long stories containing many style ranges
+   without repainting on every range. The normal 75 ms paint throttle remains
+   in force. */
+recordUsageRange = function (range,audit,context,tableDepth) {
+    var result = styleFixRecordUsageRangeBeforeProgress108(range,audit,context,tableDepth);
+    if (styleFixProgress108.running === true &&
+        styleFixProgress108.stage === "Usage traversal") {
+        styleFixProgress108.usageRanges++;
+        if (styleFixProgress108.usageRanges % 25 === 0) {
+            styleFixPaintProgress108(
+                "Text ranges checked: " + styleFixProgress108.usageRanges,
+                false
+            );
+        }
+    }
+    return result;
+};
+
+/* Dependency heartbeat. recordDependencyRef is the common reference-inspection
+   path across the dependency index. Counting calls gives an activity signal,
+   not a claimed denominator. */
+recordDependencyRef = function (audit,ref,detail) {
+    var result;
+    if (styleFixProgress108.running === true &&
+        styleFixProgress108.stage === "Dependency analysis") {
+        styleFixProgress108.dependencyChecks++;
+        if (styleFixProgress108.dependencyChecks % 10 === 0) {
+            styleFixProgress108.percent = styleFixDependencyPercent108(
+                styleFixProgress108.dependencyChecks
+            );
+            styleFixPaintProgress108(
+                "Dependency references checked: " +
+                    styleFixProgress108.dependencyChecks,
+                false
+            );
+        }
+    }
+    result = styleFixRecordDependencyRefBeforeProgress108(audit,ref,detail);
+    return result;
 };
 
 function styleFixInstallMainShowHook108() {
@@ -174,6 +249,10 @@ function styleFixProgressStart108() {
     styleFixProgress108.current = 0;
     styleFixProgress108.total = 0;
     styleFixProgress108.color = "BLUE";
+    styleFixProgress108.usageTotal = styleFixStoryCount108();
+    styleFixProgress108.usageCurrent = 0;
+    styleFixProgress108.usageRanges = 0;
+    styleFixProgress108.dependencyChecks = 0;
     styleFixPaintProgress108("Preparing style inventory and fingerprint schema...",true);
 }
 
@@ -196,7 +275,7 @@ function styleFixProgressFromStatus108(text) {
         styleFixProgress108.stage = "Usage traversal";
         styleFixProgress108.percent = 28;
         styleFixProgress108.current = 0;
-        styleFixProgress108.total = 0;
+        styleFixProgress108.total = styleFixProgress108.usageTotal;
         styleFixProgress108.color = "BLUE";
         styleFixPaintProgress108(value,true);
         return;
@@ -264,6 +343,9 @@ function styleFixPaintProgress108(operation,force) {
     elapsed = styleFixElapsedText108(now - styleFixProgress108.startedAt);
     if (styleFixProgress108.total > 0) {
         countText = String(styleFixProgress108.current) + " / " + String(styleFixProgress108.total);
+    } else if (styleFixProgress108.stage === "Dependency analysis" &&
+        styleFixProgress108.dependencyChecks > 0) {
+        countText = String(styleFixProgress108.dependencyChecks) + " checks";
     }
 
     try { if (ui.progressStage108) { ui.progressStage108.text = styleFixProgress108.stage; } } catch (ignoreStage) {}
@@ -278,6 +360,39 @@ function styleFixPaintProgress108(operation,force) {
 
     styleFixSetProgressColor108(styleFixProgress108.color);
     try { if (ui.progressWin108) { ui.progressWin108.update(); } } catch (ignoreUpdate) {}
+}
+
+function styleFixIsTopLevelStory108(label,context,tableDepth) {
+    var text = String(label || "");
+    if (Number(tableDepth) !== 0) { return false; }
+    if (context !== "STORY" && context !== "ENDNOTE") { return false; }
+    return /^(Story|Endnote story)\s/i.test(text);
+}
+
+function styleFixStoryCount108() {
+    var doc, stories;
+    try {
+        if (app.documents.length === 0) { return 0; }
+        doc = app.activeDocument;
+        stories = collectionElements(safePropertyObject(doc,"stories"));
+        return stories.length;
+    } catch (ignoreStories) {}
+    return 0;
+}
+
+function styleFixUsagePercent108(current,total) {
+    var value = 28;
+    if (total > 0) {
+        value += Math.floor((current / total) * 21);
+    }
+    if (value > 49) { value = 49; }
+    return value;
+}
+
+function styleFixDependencyPercent108(checks) {
+    var value = 52 + Math.floor(Number(checks || 0) / 30);
+    if (value > 59) { value = 59; }
+    return value;
 }
 
 function styleFixSetProgressColor108(key) {
