@@ -7,6 +7,7 @@ code with StyleFix or the fixture builder.
 Checks:
 - F05 Match, F05 Miss, F06 Match, and F06 Miss are serialized as direct uses;
 - each direct-use style carries the expected literal text;
+- D10 has zero serialized direct uses so it remains dependency-only;
 - E01 has no serialized StyleExportTagMap;
 - E02 has exactly one EPUB span mapping with class canary-e02-v108;
 - L01 exists and has no export mapping;
@@ -30,7 +31,7 @@ from collections import defaultdict
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 DIRECT = {
     "F05 Match": "F05 MATCH fill discriminator",
@@ -38,6 +39,7 @@ DIRECT = {
     "F06 Match": "F06 MATCH font discriminator",
     "F06 Miss": "F06 MISS font discriminator",
 }
+NEGATIVE_DIRECT = ["D10"]
 
 
 def local(tag: str) -> str:
@@ -78,6 +80,7 @@ def content_text(elem: ET.Element) -> str:
 
 def scan_direct(zf: zipfile.ZipFile, style_ids: dict[str, str]):
     targets = {f"Unnamed Style {name}" for name in DIRECT}
+    targets.update(f"Unnamed Style {name}" for name in NEGATIVE_DIRECT)
     found: dict[str, list[tuple[str, str]]] = defaultdict(list)
     story_names = sorted(
         name for name in zf.namelist()
@@ -130,13 +133,6 @@ def serialized_value(style_elem: ET.Element, prop: str) -> str:
     if prop == "AppliedFont":
         return child_property(style_elem, "AppliedFont")
     return style_elem.attrib.get(prop, "")
-
-
-def style_check(by_name: dict[str, ET.Element], style_name: str):
-    elem = by_name.get(style_name)
-    if elem is None:
-        return False, f"missing style {style_name}"
-    return True, "present"
 
 
 def fingerprint_checks(by_name: dict[str, ET.Element]):
@@ -220,6 +216,19 @@ def main(argv: list[str]) -> int:
                 rows.append(["DIRECT_USE", short, style_name, "YES" if ok else "NO", detail])
                 if not ok:
                     failures.append(short)
+
+            for short in NEGATIVE_DIRECT:
+                style_name = f"Unnamed Style {short}"
+                occurrences = direct.get(style_name, [])
+                ok = len(occurrences) == 0
+                detail = (
+                    f"occurrences={len(occurrences)};expected=0;"
+                    f"stories={' | '.join(x[0] for x in occurrences[:10])};"
+                    f"samples={' | '.join(x[1] for x in occurrences[:5])}"
+                )
+                rows.append(["DIRECT_USE_NEGATIVE", short, style_name, "YES" if ok else "NO", detail])
+                if not ok:
+                    failures.append(short + " direct-use negative")
 
             for short in ("E01", "E02", "L01"):
                 style_name = f"Unnamed Style {short}"
