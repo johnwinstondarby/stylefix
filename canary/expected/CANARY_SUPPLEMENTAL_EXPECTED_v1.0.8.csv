@@ -1,7 +1,11 @@
-ID,Control Class,Direct Runs,Expected Risk,Additional Acceptance
-E01,Formatting/export,0,LOW,Export Map Count = 0
-E02,Formatting/export,0,HIGH,Export Map Count >=1; EPUB span/class canary-e02-v108
-F05,Fingerprint,>=1,HIGH,Canonical Match Count = 0; only fillColor differs; recorded color pair differs
-F06,Fingerprint,>=1,HIGH,Canonical Match Count = 0; only appliedFont differs; recorded font pair differs
-I01,Dependency,0,HIGH,indexGenerationOptions.pageNumberStyle dependency >=1
-I02,Dependency,0,HIGH,PageReference.pageNumberStyleOverride dependency >=1
+Style Name,Control,Expected Risk,Direct Runs,Dependency Count,Canonical Match Count,Semantic State,Additional Acceptance
+Unnamed Style D08,D08,HIGH,0,1,0,NO EXPORT MAP,"Dependency label identifies Canary RH Variable D08; VARIABLE_OPTIONS=SUPPORTED; VARIABLE_APPLIED_STYLE=SUPPORTED"
+Unnamed Style D09,D09,HIGH,0,1,0,NO EXPORT MAP,"Dependency identifies index generation page-number style; INDEX_PAGE_NUMBER_STYLE=SUPPORTED"
+Unnamed Style D10,D10,HIGH,0,1,0,NO EXPORT MAP,"Dependency identifies Canary Topic D10 page-reference override; INDEX_ALL_TOPICS/TOPIC_PAGE_REFERENCES/PAGE_REFERENCE_STYLE_OVERRIDE=SUPPORTED"
+Unnamed Style E01,E01,LOW,0,0,0,NO EXPORT MAP,"Export Map Count=0; Formatting State=EMPTY SHELL; AUTHORIZED=YES"
+Unnamed Style E02,E02,HIGH,0,>=1,0,EXPORT-MAPPED,"Export Map Count=1; tag=span; class=canary-e02-v108; ExportMapScanComplete=YES"
+Unnamed Style F05 Match,F05,REPLACE,>=1,0,1,NO EXPORT MAP,"Canonical Match=Canary Canonical F05; fillColor=Canary Fill A; AUTHORIZED=YES"
+Unnamed Style F05 Miss,F05,HIGH,>=1,0,0,NO EXPORT MAP,"fillColor=Canary Fill B; must not match Canary Canonical F05"
+Unnamed Style F06 Match,F06,REPLACE,>=1,0,1,NO EXPORT MAP,"Canonical Match=Canary Canonical F06; appliedFont equals Fixture Font Pair first value; AUTHORIZED=YES"
+Unnamed Style F06 Miss,F06,HIGH,>=1,0,0,NO EXPORT MAP,"appliedFont equals Fixture Font Pair second value; must not match Canary Canonical F06"
+Unnamed Style L01,L01,LOW,0,0,0,NO EXPORT MAP,"Formatting State=EMPTY SHELL; AUTHORIZED=YES"
