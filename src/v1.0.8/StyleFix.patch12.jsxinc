@@ -1,0 +1,402 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/12 */
+/* ---------- accepted acceptance-contract corrections ---------- */
+
+/*
+This patch implements the accepted supplemental-fixture contract:
+- distinguish NOT_APPLICABLE from genuine capability failure;
+- select applicable representatives for basedOn and running-header variables;
+- correct the running-header character-style preference property to
+  appliedCharacterStyle (Adobe DOM: MatchCharacterStylePreference);
+- make array-like parentTextFrames locatable without weakening collection checks;
+- authorize endnote coverage from positively inventoried/scanned endnote stories;
+- establish fill/stroke color discrimination with explicit scratch colors.
+*/
+
+(function acceptanceContractInit108() {
+    var entry;
+
+    /* Adobe's MatchCharacterStylePreference exposes appliedCharacterStyle.
+       Keep the historical contract code for CSV compatibility, but correct its
+       resolved DOM name and surface before the first contract probe. */
+    entry = DOM108["VARIABLE_APPLIED_STYLE"];
+    if (entry) {
+        entry.name = "appliedCharacterStyle";
+        entry.surface = "MatchCharacterStylePreference";
+    }
+
+    /* Scratch fingerprint colors are created from Document.colors. */
+    if (DOM108["DOC_COLORS"] === undefined) {
+        domRegister108("DOC_COLORS","colors","property","Document","FINGERPRINT",false);
+    }
+}());
+
+function domInapplicableError108(message) {
+    var s = String(message || "").toLowerCase();
+    return s.indexOf("not applicable") >= 0 ||
+        s.indexOf("invalid request on a root style") >= 0 ||
+        s.indexOf("not valid for a root style") >= 0;
+}
+
+/* Five-state contract model. Internal null-object reads keep NO_INSTANCE so
+   traversal helpers can continue to distinguish missing representatives; the
+   contract audit normalizes that state to NO_APPLICABLE_INSTANCE. */
+domTryGet108 = function (obj, code) {
+    var entry = domEntry108(code), value, n = 0, message = "";
+    if (entry.kind !== "property") {
+        return {state:"FAILED", value:null, note:"Contract is not a property."};
+    }
+    if (obj === null || obj === undefined) {
+        return {state:"NO_INSTANCE", value:null, note:"No representative object."};
+    }
+    try {
+        value = obj[entry.name];
+        if (value === undefined) {
+            return {state:"NOT_EXPOSED", value:null, note:"Property returned undefined."};
+        }
+        return {state:"SUPPORTED", value:value, note:""};
+    } catch (e) {
+        try { n = Number(e.number); } catch (ignoreN) {}
+        try { message = String(e.message || e); } catch (ignoreM) {}
+        if (domInapplicableError108(message)) {
+            return {state:"NOT_APPLICABLE", value:null, note:message};
+        }
+        if (n === 55 || message.indexOf("does not support") >= 0) {
+            return {state:"NOT_EXPOSED", value:null, note:message};
+        }
+        return {state:"FAILED", value:null, note:message};
+    }
+};
+
+domTryMethod108 = function (obj, code) {
+    var entry = domEntry108(code), fn, n = 0, message = "";
+    if (entry.kind !== "method") {
+        return {state:"FAILED", value:null, note:"Contract is not a method."};
+    }
+    if (obj === null || obj === undefined) {
+        return {state:"NO_INSTANCE", value:null, note:"No representative object."};
+    }
+    try {
+        fn = obj[entry.name];
+        if (typeof fn !== "function") {
+            return {state:"NOT_EXPOSED", value:null, note:"Method is not callable."};
+        }
+        return {state:"SUPPORTED", value:fn, note:""};
+    } catch (e) {
+        try { n = Number(e.number); } catch (ignoreN) {}
+        try { message = String(e.message || e); } catch (ignoreM) {}
+        if (domInapplicableError108(message)) {
+            return {state:"NOT_APPLICABLE", value:null, note:message};
+        }
+        if (n === 55 || message.indexOf("does not support") >= 0) {
+            return {state:"NOT_EXPOSED", value:null, note:message};
+        }
+        return {state:"FAILED", value:null, note:message};
+    }
+};
+
+function contractStateNonBlocking108(state) {
+    return state === "SUPPORTED" || state === "NOT_APPLICABLE" ||
+        state === "NO_APPLICABLE_INSTANCE";
+}
+
+function findApplicableBasedOnRepresentative108(allChar) {
+    var i, p;
+    for (i = 0; i < allChar.length; i++) {
+        if (!valid(allChar[i])) { continue; }
+        p = domTryGet108(allChar[i],"STYLE_BASED_ON");
+        if (p.state === "SUPPORTED") {
+            return {style:allChar[i],probe:p};
+        }
+    }
+    return null;
+}
+
+function findRunningHeaderRepresentative108(doc) {
+    var result = {variables:0,variable:null,options:null,styleProbe:null};
+    var p = domTryGet108(doc,"DOC_TEXT_VARIABLES"), vars, i, q, r;
+    if (p.state !== "SUPPORTED") { return result; }
+    vars = collectionItems108(p.value,"Document.textVariables contract representatives",null,false).items;
+    result.variables = vars.length;
+    for (i = 0; i < vars.length; i++) {
+        q = domTryGet108(vars[i],"VARIABLE_OPTIONS");
+        if (q.state !== "SUPPORTED") { continue; }
+        r = domTryGet108(q.value,"VARIABLE_APPLIED_STYLE");
+        if (r.state === "SUPPORTED") {
+            result.variable = vars[i];
+            result.options = q.value;
+            result.styleProbe = r;
+            return result;
+        }
+    }
+    return result;
+}
+
+function recomputeContractGateAccepted108(audit) {
+    var i, item;
+    audit.blockLow = false;
+    audit.blockReasons = [];
+    audit.fatal = false;
+    for (i = 0; i < audit.items.length; i++) {
+        item = audit.items[i];
+        if (item.state === "NO_INSTANCE") {
+            item.state = "NO_APPLICABLE_INSTANCE";
+            if (!item.note) { item.note = "Active document supplied no applicable representative."; }
+        }
+        if (!item.required) { continue; }
+        if (item.state === "FAILED" || item.state === "NOT_EXPOSED") {
+            audit.blockLow = true;
+            audit.blockReasons.push(item.code + "=" + item.state);
+            if (item.role === "USAGE" || item.role === "STYLE" || item.role === "COLLECTION") {
+                audit.fatal = true;
+            }
+        }
+    }
+}
+
+var probeDomContract108BeforeAcceptance = probeDomContract108;
+probeDomContract108 = function (doc,allChar,allPara,candidates) {
+    var audit = probeDomContract108BeforeAcceptance(doc,allChar,allPara,candidates);
+    var rep, item, rh;
+
+    /* D07 supplies a positive, non-root basedOn representative when present. */
+    rep = findApplicableBasedOnRepresentative108(allChar);
+    item = audit.byCode.STYLE_BASED_ON;
+    if (item) {
+        if (rep !== null) {
+            item.state = "SUPPORTED";
+            item.note = "Applicable non-root character-style representative: " + styleName(rep.style);
+        } else if (item.state === "FAILED") {
+            item.state = "NOT_APPLICABLE";
+        }
+    }
+
+    /* A MATCH_CHARACTER_STYLE variable is the only positive representative for
+       the running-header character-style preference. Without one, absence is an
+       evidence state, not a capability failure. */
+    rh = findRunningHeaderRepresentative108(doc);
+    item = audit.byCode.VARIABLE_OPTIONS;
+    if (item) {
+        if (rh.variable !== null) {
+            item.state = "SUPPORTED";
+            item.note = "Applicable running-header character-style variable: " + safeProperty(rh.variable,"name","running header");
+        } else if (rh.variables === 0) {
+            item.state = "NO_APPLICABLE_INSTANCE";
+            item.note = "No text-variable instances in the active document.";
+        } else if (item.state === "FAILED" || item.state === "NOT_EXPOSED" || item.state === "NO_INSTANCE") {
+            item.state = "NOT_APPLICABLE";
+            item.note = "Text variables exist, but none exposes running-header character-style options.";
+        }
+    }
+    item = audit.byCode.VARIABLE_APPLIED_STYLE;
+    if (item) {
+        if (rh.options !== null && rh.styleProbe && rh.styleProbe.state === "SUPPORTED") {
+            item.state = "SUPPORTED";
+            item.note = "MatchCharacterStylePreference.appliedCharacterStyle positively exercised.";
+        } else {
+            item.state = "NO_APPLICABLE_INSTANCE";
+            item.note = "No MATCH_CHARACTER_STYLE variable supplied an applicable preference object.";
+        }
+    }
+
+    recomputeContractGateAccepted108(audit);
+    return audit;
+};
+
+/* Array-like values such as parentTextFrames do not necessarily expose item().
+   Prefer item() for InDesign collections and fall back to numeric indexing only
+   when the value is genuinely array-like. */
+collectionItems108 = function (collection,label,audit,strict) {
+    var result = {items:[],length:0,count:null,complete:true,detail:""};
+    var len, i, item, errors = [], itemFn = null;
+    if (collection === null || collection === undefined) {
+        result.complete = false;
+        result.detail = label + ": null collection";
+        if (audit && strict) { addGlobalAuditError(audit,label,null); }
+        return result;
+    }
+    try {
+        len = Number(collection[domEntry108("COLLECTION_LENGTH").name]);
+        if (isNaN(len) || len < 0) { throw new Error("non-numeric length"); }
+        result.length = len;
+    } catch (eLen) {
+        result.complete = false;
+        result.detail = "length=" + errorSummary(eLen);
+        if (audit && strict) { addGlobalAuditError(audit,label + " length",eLen); }
+        return result;
+    }
+    try { itemFn = collection[domEntry108("COLLECTION_ITEM").name]; } catch (ignoreItemFn) { itemFn = null; }
+    try {
+        if (typeof collection[domEntry108("COLLECTION_COUNT").name] === "function") {
+            result.count = Number(collection[domEntry108("COLLECTION_COUNT").name]());
+            if (!isNaN(result.count) && result.count !== result.length) {
+                result.complete = false;
+                errors.push("count mismatch length=" + result.length + " count=" + result.count);
+            }
+        }
+    } catch (eCount) {
+        errors.push("count() unavailable: " + errorSummary(eCount));
+    }
+    for (i = 0; i < result.length; i++) {
+        item = null;
+        try {
+            if (typeof itemFn === "function") { item = collection[domEntry108("COLLECTION_ITEM").name](i); }
+            else { item = collection[i]; }
+            if (item === null || item === undefined) { throw new Error("item(" + i + ") returned null"); }
+            result.items.push(item);
+        } catch (eItem) {
+            result.complete = false;
+            errors.push("item(" + i + ")=" + errorSummary(eItem));
+            if (audit && strict) { addGlobalAuditError(audit,label + " item(" + i + ")",eItem); }
+        }
+    }
+    if (result.items.length !== result.length) {
+        result.complete = false;
+        errors.push("enumerated=" + result.items.length + " expected=" + result.length);
+    }
+    result.detail = errors.join("; ");
+    return result;
+};
+
+/* Endnote authorization follows the content path the scanner really uses:
+   Document.stories. Frame-to-story linkage remains diagnostic corroboration. */
+addEndnoteCoverage108 = function (audit,doc,stories,inv,frameProbe) {
+    var classification = audit.byCode.ENDNOTE_CLASSIFICATION;
+    var note = "", frames = [], storyKeys = {}, i, parentStory, key, unresolved = 0;
+
+    if (inv.endnoteStories > 0 && classification && classification.state === "SUPPORTED") {
+        if (frameProbe.state === "SUPPORTED") {
+            frames = collectionItems108(frameProbe.value,"Document.endnoteTextFrames",null,false).items;
+            for (i = 0; i < stories.length; i++) {
+                key = objectKey(stories[i]);
+                if (key !== "") { storyKeys[key] = true; }
+            }
+            for (i = 0; i < frames.length; i++) {
+                try { parentStory = frames[i][domEntry108("FRAME_PARENT_STORY").name]; }
+                catch (ignoreParentStory) { parentStory = null; }
+                key = objectKey(parentStory);
+                if (key === "" || storyKeys[key] !== true) { unresolved++; }
+            }
+            note = "Endnote stories are positively inventoried in Document.stories and are scanned directly.";
+            if (unresolved > 0) {
+                note += " Diagnostic only: " + unresolved + " endnote frame-to-story link(s) did not resolve.";
+            }
+        } else {
+            note = "Endnote stories are positively inventoried in Document.stories and are scanned directly; endnoteTextFrames=" + frameProbe.state + ".";
+        }
+        addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
+            "SUPPORTED",inv.endnoteStories,true,note);
+        return;
+    }
+
+    if (inv.endnoteStories === 0 && inv.endnoteTextFrames === 0) {
+        addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
+            "NO_INSTANCE",0,true,"No endnote instances were inventoried.");
+        return;
+    }
+
+    addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
+        "FAILED",Math.max(inv.endnoteStories,inv.endnoteTextFrames),true,
+        "Endnote instances exist but no endnote story could be positively classified in Document.stories.");
+};
+
+function benignDependencyState108(state) {
+    return state === "NOT_APPLICABLE" || state === "NO_INSTANCE" ||
+        state === "NO_APPLICABLE_INSTANCE";
+}
+
+blockDependencySurface108 = function (audit,label,state,note) {
+    var detail;
+    if (benignDependencyState108(state)) {
+        setDepSurface108(audit,label,label,state,"N/A",note || "");
+        return;
+    }
+    detail = label + "=" + state + (note ? " (" + note + ")" : "");
+    if (!containsString(audit.contractBlocks,detail)) { audit.contractBlocks.push(detail); }
+    setDepSurface108(audit,label,label,state,"UNKNOWN",note || "");
+};
+
+recordDependencyContract108 = function (audit,obj,contractCode,detail) {
+    var p = domTryGet108(obj,contractCode);
+    if (p.state === "SUPPORTED") {
+        recordDependencyRef(audit,p.value,detail);
+        return;
+    }
+    if (benignDependencyState108(p.state)) { return; }
+
+    /* appliedCharacterStyle is subtype-specific. Its absence on a non-running-
+       header preference object is not evidence that the required running-header
+       surface is missing from the build. The DOM contract supplies the positive
+       proof when an applicable MATCH_CHARACTER_STYLE variable exists. */
+    if (contractCode === "VARIABLE_APPLIED_STYLE" && p.state === "NOT_EXPOSED") { return; }
+
+    blockDependencySurface108(audit,domEntry108(contractCode).surface + "." +
+        domEntry108(contractCode).name,p.state,p.note);
+};
+
+/* Deterministic scratch colors make object-valued fingerprint discrimination
+   falsifiable without depending on whatever built-in swatches a new document
+   happens to expose. */
+fingerprintDiscriminationProbe108 = function () {
+    var result = {ok:false,detail:"",tests:[],fontA:"",fontB:"",colorA:"",colorB:"",languageA:"",languageB:""};
+    var pd = null, styles, a, b, colorsProbe, colors, addName, ca, cb, fonts, langs, pair;
+    try {
+        pd = app.documents.add(false);
+        styles = pd[domEntry108("DOC_CHARACTER_STYLES").name];
+        a = styles.add({name:"StyleFix Fingerprint Probe A"});
+        b = styles.add({name:"StyleFix Fingerprint Probe B"});
+
+        a.pointSize = 11; b.pointSize = 12;
+        addFingerprintSemanticTest108(result,"pointSize",
+            normalizedProperty(a,"pointSize") !== normalizedProperty(b,"pointSize"),
+            normalizedProperty(a,"pointSize"),normalizedProperty(b,"pointSize"));
+        a.tracking = 0; b.tracking = 25;
+        addFingerprintSemanticTest108(result,"tracking",
+            normalizedProperty(a,"tracking") !== normalizedProperty(b,"tracking"),
+            normalizedProperty(a,"tracking"),normalizedProperty(b,"tracking"));
+
+        colorsProbe = domTryGet108(pd,"DOC_COLORS");
+        if (colorsProbe.state !== "SUPPORTED") { throw new Error("Document.colors=" + colorsProbe.state); }
+        colors = colorsProbe.value;
+        addName = domEntry108("COLLECTION_ADD").name;
+        if (typeof colors[addName] !== "function") { throw new Error("Colors.add is unavailable"); }
+        ca = colors[addName]({name:"StyleFix Probe Color A",model:ColorModel.PROCESS,space:ColorSpace.RGB,colorValue:[16,64,128]});
+        cb = colors[addName]({name:"StyleFix Probe Color B",model:ColorModel.PROCESS,space:ColorSpace.RGB,colorValue:[224,32,16]});
+
+        a.fillColor = ca; b.fillColor = cb;
+        result.colorA = normalizedProperty(a,"fillColor");
+        result.colorB = normalizedProperty(b,"fillColor");
+        addFingerprintSemanticTest108(result,"fillColor",result.colorA !== "NOTHING" &&
+            result.colorB !== "NOTHING" && result.colorA !== result.colorB,result.colorA,result.colorB);
+
+        a.strokeColor = ca; b.strokeColor = cb;
+        addFingerprintSemanticTest108(result,"strokeColor",
+            normalizedProperty(a,"strokeColor") !== "NOTHING" &&
+            normalizedProperty(b,"strokeColor") !== "NOTHING" &&
+            normalizedProperty(a,"strokeColor") !== normalizedProperty(b,"strokeColor"),
+            normalizedProperty(a,"strokeColor"),normalizedProperty(b,"strokeColor"));
+
+        fonts = collectionItems108(app[domEntry108("APP_FONTS").name],"Application.fonts",null,false).items;
+        pair = findAssignableStylePair108(a,b,"appliedFont",fonts);
+        if (pair === null) { throw new Error("Could not establish two distinguishable appliedFont values."); }
+        result.fontA = pair.aName; result.fontB = pair.bName;
+        addFingerprintSemanticTest108(result,"appliedFont",pair.distinct,pair.aValue,pair.bValue);
+
+        try {
+            langs = collectionItems108(app[domEntry108("APP_LANGUAGES").name],"Application.languagesWithVendors",null,false).items;
+            pair = findAssignableStylePair108(a,b,"appliedLanguage",langs);
+            if (pair !== null) {
+                result.languageA = pair.aName; result.languageB = pair.bName;
+                addFingerprintSemanticTest108(result,"appliedLanguage",pair.distinct,pair.aValue,pair.bValue);
+            }
+        } catch (ignoreLanguageProbe) {}
+
+        result.ok = fingerprintTestsPass108(result.tests);
+        result.detail = result.ok ? "critical fingerprint dimensions discriminate" : "one or more discrimination tests failed";
+    } catch (e) {
+        result.ok = false;
+        result.detail = errorSummary(e);
+    } finally {
+        if (pd !== null) { try { pd.close(SaveOptions.NO); } catch (ignoreClose) {} }
+    }
+    return result;
+};
