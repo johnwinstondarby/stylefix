@@ -17,7 +17,7 @@ evidence rather than guesswork.
 */
 
 (function () {
-    var VERSION = "1.0.0";
+    var VERSION = "1.0.1";
     var TARGETS = {C09:true,C10:true,C12:true,C13:true,C14:true};
     var doc, lines = [], hits = {}, i;
 
@@ -37,6 +37,7 @@ evidence rather than guesswork.
     log("");
 
     scanDocument();
+    scanParentPagesForC14();
 
     log("");
     log("Summary");
@@ -51,6 +52,31 @@ evidence rather than guesswork.
         var stories = collectionArray(doc.stories), s;
         for (s = 0; s < stories.length; s++) {
             scanTextContainer(stories[s],"Story[" + s + "]",0);
+        }
+    }
+
+    function scanParentPagesForC14() {
+        var masters = collectionArray(safeObject(function(){ return doc.masterSpreads; }));
+        var m, pages, p, frames, f;
+        log("");
+        log("Parent/master page direct scan");
+        log("------------------------------");
+        log("masterSpreads.length=" + masters.length);
+        for (m = 0; m < masters.length; m++) {
+            pages = collectionArray(safeObjectFactory(masters[m],"pages"));
+            log("masterSpread[" + m + "] pages=" + pages.length + "; name=" + objectName(masters[m]));
+            for (p = 0; p < pages.length; p++) {
+                log("  parentPage[" + p + "]=" + objectSummary(pages[p]) + "; bounds=" + boundsText(pages[p]));
+                frames = collectionArray(safeObjectFactory(pages[p],"textFrames"));
+                log("  parentPage[" + p + "].textFrames=" + frames.length);
+                for (f = 0; f < frames.length; f++) {
+                    log("    frame[" + f + "]=" + objectSummary(frames[f]) + "; bounds=" + boundsText(frames[f]));
+                    try {
+                        scanTextContainer(frames[f].parentStory,
+                            "MasterSpread[" + m + "].Page[" + p + "].TextFrame[" + f + "].parentStory",0);
+                    } catch (ignoreStory) {}
+                }
+            }
         }
     }
 
@@ -97,10 +123,24 @@ evidence rather than guesswork.
         log("Range valid: " + validity(range));
         log("Range chars: " + safeString(function(){ return String(range.contents).length; },"ERR"));
         log("Range sample: " + preview(safeString(function(){ return range.contents; },"")));
+        log("range.parent=" + objectSummary(safeObject(function(){ return range.parent; })));
 
         traceFrames("range.parentTextFrames",safeObject(function(){ return range.parentTextFrames; }));
         traceInsertionPoints(range);
         traceStory(range);
+        if (id === "C14") { traceC14ParentChain(range); }
+    }
+
+    function traceC14ParentChain(range) {
+        var obj = range, depth = 0, parent;
+        log("C14 text/table parent chain:");
+        while (obj !== null && depth < 12) {
+            log(indent(depth) + "node=" + objectSummary(obj) + "; bounds=" + boundsText(obj));
+            parent = safeObject(function(){ return obj.parent; });
+            if (parent === null || parent === obj) { break; }
+            obj = parent;
+            depth++;
+        }
     }
 
     function traceInsertionPoints(range) {
@@ -137,8 +177,21 @@ evidence rather than guesswork.
                 "; hasEveryItem=" + safeString(function(){ return typeof value.everyItem; },"ERR"));
         }
         for (i = 0; i < frames.length; i++) {
-            log(label + "[" + i + "]=" + objectSummary(frames[i]));
+            log(label + "[" + i + "]=" + objectSummary(frames[i]) + "; bounds=" + boundsText(frames[i]));
+            traceOwningSpread(label + "[" + i + "]",frames[i]);
             traceObjectChain(frames[i],label + "[" + i + "]",0,{});
+        }
+    }
+
+    function traceOwningSpread(label,obj) {
+        var spread = findAncestorType(obj,"Spread",12), pages, i;
+        if (spread === null) { return; }
+        pages = collectionArray(safeObjectFactory(spread,"pages"));
+        log(label + ".owningSpread=" + objectSummary(spread) + "; pages=" + pages.length);
+        for (i = 0; i < pages.length; i++) {
+            log(label + ".owningSpread.pages[" + i + "]=" + objectSummary(pages[i]) +
+                "; bounds=" + boundsText(pages[i]) +
+                "; overlap=" + overlapText(obj,pages[i]));
         }
     }
 
@@ -157,6 +210,7 @@ evidence rather than guesswork.
             " type=" + typeName(obj) +
             "; valid=" + validity(obj) +
             "; parentPage=" + objectSummary(page) +
+            "; bounds=" + boundsText(obj) +
             "; parentPageString=" + safeString(function(){ return String(page); },"ERR"));
 
         parent = safeObject(function(){ return obj.parent; });
@@ -166,13 +220,48 @@ evidence rather than guesswork.
         }
         log(indent(depth) + label + ".parent=" + objectSummary(parent));
 
-        /* Characters and insertion points can identify the host text frame. */
         if (typeName(parent) === "Character" || typeName(parent) === "InsertionPoint") {
             traceFrames(indent(depth) + label + ".parent.parentTextFrames",
                 safeObject(function(){ return parent.parentTextFrames; }));
         }
 
         traceObjectChain(parent,label + ".parent",depth + 1,seen);
+    }
+
+    function findAncestorType(obj,wanted,maxDepth) {
+        var current = obj, parent, depth = 0;
+        while (current !== null && depth <= maxDepth) {
+            if (typeName(current) === wanted) { return current; }
+            parent = safeObject(function(){ return current.parent; });
+            if (parent === null || parent === current) { return null; }
+            current = parent;
+            depth++;
+        }
+        return null;
+    }
+
+    function boundsArray(obj) {
+        var b = safeObject(function(){ return obj.geometricBounds; });
+        if (b === null) { b = safeObject(function(){ return obj.bounds; }); }
+        if (b === null || b.length === undefined || b.length < 4) { return null; }
+        return [Number(b[0]),Number(b[1]),Number(b[2]),Number(b[3])];
+    }
+
+    function boundsText(obj) {
+        var b = boundsArray(obj);
+        if (b === null) { return "N/A"; }
+        return "[" + b.join(",") + "]";
+    }
+
+    function overlapText(a,b) {
+        var x = boundsArray(a), y = boundsArray(b), top, left, bottom, right, area;
+        if (x === null || y === null) { return "N/A"; }
+        top = Math.max(x[0],y[0]);
+        left = Math.max(x[1],y[1]);
+        bottom = Math.min(x[2],y[2]);
+        right = Math.min(x[3],y[3]);
+        area = (bottom > top && right > left) ? (bottom-top)*(right-left) : 0;
+        return String(area);
     }
 
     function collectionArray(value) {
