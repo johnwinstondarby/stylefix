@@ -4,22 +4,23 @@
 StyleFix v1.0.8 supplemental D10 cleanup repair.
 
 Purpose:
-- neutralize the one generated index page-number text run that inherits D10;
+- neutralize the generated index page-number text run if D10 is still applied;
+- accept an already-clean INDD when D10 has zero direct text uses;
 - preserve the underlying Index/Topic/PageReference dependency;
-- verify Unnamed Style D10 has zero direct text uses after cleanup;
-- save the INDD and re-export the matching IDML fixture.
+- verify Unnamed Style D10 has zero direct text uses after cleanup and save;
+- re-export the matching IDML fixture so serialized evidence matches the INDD.
 
 This script is fixture-only. It does not import or modify StyleFix scanner code.
 */
 
 (function () {
-    var VERSION = "1.0.1";
+    var VERSION = "1.0.2";
     var DOC_NAME = "StyleFix_Canary_Supplemental_v1_0_8.indd";
     var INDEX_NAME = "StyleFix Shared Index D09-D10";
     var TOPIC_NAME = "Canary Topic D10";
     var STYLE_NAME = "Unnamed Style D10";
     var doc, style, noneStyle, idx, topic, ref, before, after, afterSave;
-    var lines = [], ok = true, targets = [], sample = "";
+    var lines = [], ok = true, targets = [], sample = "", action = "";
 
     if (app.documents.length === 0) {
         alert("Open " + DOC_NAME + " first.");
@@ -50,16 +51,22 @@ This script is fixture-only. It does not import or modify StyleFix scanner code.
         }
 
         before = countDirectUses(style,targets);
-        if (before !== 1 || targets.length !== 1) {
-            throw new Error("Expected exactly one generated direct D10 run before repair; found " + before + ".");
+        if (before > 1 || targets.length > 1) {
+            throw new Error("Expected zero or one generated direct D10 run before repair; found " + before + ".");
         }
 
-        try { sample = String(targets[0].contents); } catch (ignoreSample) { sample = ""; }
-        neutralizeRange(targets[0],noneStyle);
+        if (before === 1) {
+            try { sample = String(targets[0].contents); } catch (ignoreSample) { sample = ""; }
+            neutralizeRange(targets[0],noneStyle);
+            action = "Neutralized one generated D10 text run";
+        } else {
+            sample = "<none>";
+            action = "INDD already had zero direct D10 runs; refresh evidence only";
+        }
 
         after = countDirectUses(style,[]);
         if (after !== 0) {
-            throw new Error("Direct D10 uses remain after neutralization: " + after + ".");
+            throw new Error("Direct D10 uses remain after cleanup: " + after + ".");
         }
 
         topic = findTopic(idx,TOPIC_NAME);
@@ -83,6 +90,7 @@ This script is fixture-only. It does not import or modify StyleFix scanner code.
         lines.push("Version: " + VERSION);
         lines.push("Document: " + doc.name);
         lines.push("Direct D10 uses before: " + before);
+        lines.push("Action: " + action);
         lines.push("Generated D10 sample: " + sample);
         lines.push("Replacement character style: " + safeStyleName(noneStyle));
         lines.push("Direct D10 uses after: " + after);
@@ -90,7 +98,7 @@ This script is fixture-only. It does not import or modify StyleFix scanner code.
         lines.push("Dependency retained: YES");
         lines.push("IDML re-exported: YES");
         lines.push("");
-        lines.push("PASS: D10 is dependency-only after cleanup.");
+        lines.push("PASS: D10 is dependency-only and INDD/IDML evidence was refreshed.");
     } catch (e) {
         ok = false;
         lines.push("FAIL: " + errText(e));
