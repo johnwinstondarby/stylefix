@@ -1,0 +1,371 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/08 */
+/* ---------- dependency index / export semantics ---------- */
+
+function emptyDependency108() {
+    return {
+        count:0,details:[],exportMapCount:0,exportDetails:[],
+        exportEnumeration:""
+    };
+}
+
+function buildDependencyMap108(doc,candidates,allChar,contractAudit) {
+    var audit = {
+        map:{},lookup:buildCandidateLookup(candidates),
+        errors:0,errorDetails:[],na:[],surfaces:[],contractBlocks:[],
+        exportAudit:{
+            complete:true,stylesChecked:0,lengthTotal:0,countTotal:0,
+            enumeratedTotal:0,mismatches:[],semantic:null
+        }
+    };
+    var i, j, k, item, ps, p, result, collection, options, refs, topics, topic;
+    var allPara = safeAllParagraphStyles108(doc);
+
+    for (i = 0; i < candidates.length; i++) {
+        audit.map[styleKey(candidates[i])] = emptyDependency108();
+    }
+
+    /* Character-style inheritance. */
+    setDepSurface108(audit,"CHARACTER_STYLE_BASED_ON","CharacterStyle.basedOn","SUPPORTED",allChar.length,"");
+    for (i = 0; i < allChar.length; i++) {
+        item = allChar[i];
+        if (!valid(item)) { continue; }
+        p = domTryGet108(item,"STYLE_BASED_ON");
+        if (p.state !== "SUPPORTED") {
+            blockDependencySurface108(audit,"CharacterStyle.basedOn",p.state,p.note);
+            continue;
+        }
+        recordDependencyRef(audit,p.value,"Based-on: " + styleName(item));
+    }
+
+    /* Paragraph style references. */
+    setDepSurface108(audit,"PARAGRAPH_STYLE_REFERENCES","Paragraph styles","SUPPORTED",allPara.length,"");
+    for (i = 0; i < allPara.length; i++) {
+        ps = allPara[i];
+        if (!valid(ps)) { continue; }
+        recordDependencyContract108(audit,ps,"PARA_DROP_CAP_STYLE","Paragraph " + styleName(ps) + " drop cap");
+        recordDependencyContract108(audit,ps,"PARA_BULLETS_STYLE","Paragraph " + styleName(ps) + " bullets");
+        recordDependencyContract108(audit,ps,"PARA_NUMBERING_STYLE","Paragraph " + styleName(ps) + " numbering");
+        recordAppliedStyleCollection108(audit,ps,"PARA_NESTED_STYLES","Paragraph " + styleName(ps) + " nested style");
+        recordAppliedStyleCollection108(audit,ps,"PARA_NESTED_GREP_STYLES","Paragraph " + styleName(ps) + " nested GREP");
+        recordAppliedStyleCollection108(audit,ps,"PARA_NESTED_LINE_STYLES","Paragraph " + styleName(ps) + " nested line");
+    }
+
+    /* Text variables. */
+    p = domTryGet108(doc,"DOC_TEXT_VARIABLES");
+    if (p.state === "SUPPORTED") {
+        result = collectionItems108(p.value,"Document.textVariables",audit,true);
+        setDepSurface108(audit,"TEXT_VARIABLES","Document.textVariables","SUPPORTED",result.length,result.detail);
+        collection = result.items;
+        for (i = 0; i < collection.length; i++) {
+            item = collection[i];
+            p = domTryGet108(item,"VARIABLE_OPTIONS");
+            if (p.state !== "SUPPORTED") {
+                blockDependencySurface108(audit,"TextVariable.variableOptions",p.state,p.note);
+                continue;
+            }
+            options = p.value;
+            recordDependencyContract108(audit,options,"VARIABLE_APPLIED_STYLE",
+                "Text variable: " + safeProperty(item,"name","#" + i));
+        }
+    } else { blockDependencySurface108(audit,"Document.textVariables",p.state,p.note); }
+
+    /* Cross-reference formats and building blocks. */
+    p = domTryGet108(doc,"DOC_CROSS_REFERENCE_FORMATS");
+    if (p.state === "SUPPORTED") {
+        result = collectionItems108(p.value,"Document.crossReferenceFormats",audit,true);
+        setDepSurface108(audit,"CROSS_REFERENCE_FORMATS","Document.crossReferenceFormats","SUPPORTED",result.length,result.detail);
+        collection = result.items;
+        for (i = 0; i < collection.length; i++) {
+            item = collection[i];
+            recordDependencyContract108(audit,item,"CROSSREF_APPLIED_CHARACTER_STYLE",
+                "Cross-reference format: " + safeProperty(item,"name","#" + i));
+            recordAppliedStyleCollection108(audit,item,"CROSSREF_BUILDING_BLOCKS",
+                "Cross-reference building block: " + safeProperty(item,"name","#" + i));
+        }
+    } else { blockDependencySurface108(audit,"Document.crossReferenceFormats",p.state,p.note); }
+
+    scanNamedSource108(audit,doc,"DOC_HYPERLINK_TEXT_SOURCES","Hyperlink source");
+    scanNamedSource108(audit,doc,"DOC_CROSS_REFERENCE_SOURCES","Cross-reference source");
+
+    /* TOC references. */
+    p = domTryGet108(doc,"DOC_TOC_STYLES");
+    if (p.state === "SUPPORTED") {
+        result = collectionItems108(p.value,"Document.tocStyles",audit,true);
+        setDepSurface108(audit,"TOC_STYLES","Document.tocStyles","SUPPORTED",result.length,result.detail);
+        collection = result.items;
+        for (i = 0; i < collection.length; i++) {
+            item = collection[i];
+            p = domTryGet108(item,"TOC_STYLE_ENTRIES");
+            if (p.state !== "SUPPORTED") {
+                blockDependencySurface108(audit,"TOCStyle.tocStyleEntries",p.state,p.note);
+                continue;
+            }
+            refs = collectionItems108(p.value,"TOCStyle.tocStyleEntries",audit,true).items;
+            for (j = 0; j < refs.length; j++) {
+                recordDependencyContract108(audit,refs[j],"TOC_PAGE_NUMBER_STYLE",
+                    "TOC " + safeProperty(item,"name","#" + i) + " page number");
+                recordDependencyContract108(audit,refs[j],"TOC_SEPARATOR_STYLE",
+                    "TOC " + safeProperty(item,"name","#" + i) + " separator");
+            }
+        }
+    } else { blockDependencySurface108(audit,"Document.tocStyles",p.state,p.note); }
+
+    /* Footnote/endnote marker dependencies. */
+    p = domTryGet108(doc,"DOC_FOOTNOTE_OPTIONS");
+    if (p.state === "SUPPORTED") {
+        setDepSurface108(audit,"FOOTNOTE_OPTIONS","Document.footnoteOptions","SUPPORTED",1,"");
+        recordDependencyContract108(audit,p.value,"FOOTNOTE_MARKER_STYLE","Footnote marker style");
+    } else { blockDependencySurface108(audit,"Document.footnoteOptions",p.state,p.note); }
+
+    p = domTryGet108(doc,"DOC_ENDNOTE_OPTIONS");
+    if (p.state === "SUPPORTED") {
+        setDepSurface108(audit,"ENDNOTE_OPTIONS","Document.endnoteOptions","SUPPORTED",1,"");
+        recordDependencyContract108(audit,p.value,"ENDNOTE_MARKER_STYLE","Endnote marker style");
+    } else { blockDependencySurface108(audit,"Document.endnoteOptions",p.state,p.note); }
+
+    /* Correct index-generation path: Document.indexGenerationOptions. */
+    p = domTryGet108(doc,"DOC_INDEX_GENERATION_OPTIONS");
+    if (p.state === "SUPPORTED") {
+        options = p.value;
+        setDepSurface108(audit,"INDEX_GENERATION_OPTIONS","Document.indexGenerationOptions","SUPPORTED",1,"");
+        recordDependencyContract108(audit,options,"INDEX_PAGE_NUMBER_STYLE","Index generation: page number");
+        recordDependencyContract108(audit,options,"INDEX_CROSS_REFERENCE_STYLE","Index generation: cross reference");
+        recordDependencyContract108(audit,options,"INDEX_CROSS_REFERENCE_TOPIC_STYLE","Index generation: cross-reference topic");
+    } else {
+        blockDependencySurface108(audit,"Document.indexGenerationOptions",p.state,p.note);
+    }
+
+    /* Index topic/page-reference overrides survive the one-pass refactor. */
+    p = domTryGet108(doc,"DOC_INDEXES");
+    if (p.state === "SUPPORTED") {
+        result = collectionItems108(p.value,"Document.indexes",audit,true);
+        setDepSurface108(audit,"INDEXES","Document.indexes","SUPPORTED",result.length,result.detail);
+        collection = result.items;
+        for (i = 0; i < collection.length; i++) {
+            p = domTryGet108(collection[i],"INDEX_ALL_TOPICS");
+            if (p.state !== "SUPPORTED") {
+                blockDependencySurface108(audit,"Index.allTopics",p.state,p.note);
+                continue;
+            }
+            topics = safeArrayLike(p.value);
+            for (j = 0; j < topics.length; j++) {
+                topic = topics[j];
+                p = domTryGet108(topic,"TOPIC_PAGE_REFERENCES");
+                if (p.state !== "SUPPORTED") {
+                    blockDependencySurface108(audit,"Topic.pageReferences",p.state,p.note);
+                    continue;
+                }
+                refs = collectionItems108(p.value,"Topic.pageReferences",audit,true).items;
+                for (k = 0; k < refs.length; k++) {
+                    recordDependencyContract108(audit,refs[k],"PAGE_REFERENCE_STYLE_OVERRIDE",
+                        "Index page-reference override: " + safeProperty(topic,"name","topic"));
+                }
+            }
+        }
+    } else { blockDependencySurface108(audit,"Document.indexes",p.state,p.note); }
+
+    scanXmlMapCollection108(audit,doc,"DOC_XML_IMPORT_MAPS","XML import style map");
+    scanXmlMapCollection108(audit,doc,"DOC_XML_EXPORT_MAPS","XML export style map");
+
+    /* Export-tag mappings get a semantic scratch probe plus per-style length/count/item cross-checks. */
+    audit.exportAudit.semantic = exportMapSemanticProbe108();
+    if (!audit.exportAudit.semantic.ok) {
+        audit.exportAudit.complete = false;
+        audit.exportAudit.mismatches.push("semantic probe failed: " + audit.exportAudit.semantic.detail);
+    }
+    scanStyleExportTagMaps108(audit,candidates);
+
+    return audit;
+}
+
+function recordDependencyContract108(audit,obj,contractCode,detail) {
+    var p = domTryGet108(obj,contractCode);
+    if (p.state === "SUPPORTED") {
+        recordDependencyRef(audit,p.value,detail);
+        return;
+    }
+    if (p.state === "NO_INSTANCE") { return; }
+    blockDependencySurface108(audit,domEntry108(contractCode).surface + "." + domEntry108(contractCode).name,p.state,p.note);
+}
+
+function recordAppliedStyleCollection108(audit,obj,collectionContract,label) {
+    var p = domTryGet108(obj,collectionContract), result, elements, i, q;
+    if (p.state !== "SUPPORTED") {
+        if (p.state !== "NO_INSTANCE") {
+            blockDependencySurface108(audit,domEntry108(collectionContract).surface + "." + domEntry108(collectionContract).name,p.state,p.note);
+        }
+        return;
+    }
+    result = collectionItems108(p.value,label,audit,true);
+    elements = result.items;
+    for (i = 0; i < elements.length; i++) {
+        q = domTryGet108(elements[i],"NESTED_APPLIED_CHARACTER_STYLE");
+        if (q.state === "SUPPORTED") {
+            recordDependencyRef(audit,q.value,label + " #" + i);
+            continue;
+        }
+        q = domTryGet108(elements[i],"NESTED_APPLIED_STYLE");
+        if (q.state === "SUPPORTED") { recordDependencyRef(audit,q.value,label + " #" + i); }
+    }
+}
+
+function scanNamedSource108(audit,doc,docContract,label) {
+    var p = domTryGet108(doc,docContract), result, elements, i;
+    if (p.state !== "SUPPORTED") {
+        blockDependencySurface108(audit,domEntry108(docContract).surface + "." + domEntry108(docContract).name,p.state,p.note);
+        return;
+    }
+    result = collectionItems108(p.value,label,audit,true);
+    setDepSurface108(audit,docContract,label,"SUPPORTED",result.length,result.detail);
+    elements = result.items;
+    for (i = 0; i < elements.length; i++) {
+        recordDependencyContract108(audit,elements[i],"SOURCE_APPLIED_CHARACTER_STYLE",
+            label + ": " + safeProperty(elements[i],"name","#" + i));
+    }
+}
+
+function scanXmlMapCollection108(audit,doc,docContract,label) {
+    var p = domTryGet108(doc,docContract), result, elements, i;
+    if (p.state !== "SUPPORTED") {
+        blockDependencySurface108(audit,label,p.state,p.note);
+        return;
+    }
+    result = collectionItems108(p.value,label,audit,true);
+    setDepSurface108(audit,docContract,label,"SUPPORTED",result.length,result.detail);
+    elements = result.items;
+    for (i = 0; i < elements.length; i++) {
+        recordDependencyContract108(audit,elements[i],"XML_MAPPED_STYLE",label + " #" + i);
+    }
+}
+
+function setDepSurface108(audit,code,label,state,instances,note) {
+    audit.surfaces.push({code:code,label:label,state:state,instances:instances,note:note || ""});
+}
+
+function blockDependencySurface108(audit,label,state,note) {
+    var detail = label + "=" + state + (note ? " (" + note + ")" : "");
+    if (!containsString(audit.contractBlocks,detail)) { audit.contractBlocks.push(detail); }
+    setDepSurface108(audit,label,label,state,"UNKNOWN",note || "");
+}
+
+function dependencySurfaceSummary108(audit) {
+    var out = [], i, s;
+    for (i = 0; i < audit.surfaces.length; i++) {
+        s = audit.surfaces[i];
+        out.push(s.label + "=" + s.state + ";instances=" + s.instances);
+    }
+    if (audit.contractBlocks.length > 0) { out.push("BLOCKS=" + audit.contractBlocks.join(" ~ ")); }
+    return out.join(" | ");
+}
+
+function exportMapSemanticProbe108() {
+    var result = {ok:false,detail:"",length:0,count:null,enumerated:0,tag:"",className:""};
+    var pd = null, styles, style, maps, map, enumResult, p;
+    try {
+        pd = app.documents.add(false);
+        styles = pd[domEntry108("DOC_CHARACTER_STYLES").name];
+        style = styles.add({name:"StyleFix Export Probe"});
+        maps = style[domEntry108("STYLE_EXPORT_TAG_MAPS").name];
+        if (typeof maps[domEntry108("COLLECTION_ADD").name] !== "function") {
+            throw new Error("StyleExportTagMaps.add is unavailable");
+        }
+        maps[domEntry108("COLLECTION_ADD").name]("EPUB","span","stylefix-export-probe","");
+        enumResult = exportMapCollection108(maps,"semantic probe",null);
+        result.length = enumResult.length;
+        result.count = enumResult.count;
+        result.enumerated = enumResult.items.length;
+        if (enumResult.items.length !== 1) {
+            throw new Error("expected one export map, enumerated " + enumResult.items.length);
+        }
+        map = enumResult.items[0];
+        p = domTryGet108(map,"EXPORT_MAP_TAG");
+        if (p.state !== "SUPPORTED") { throw new Error("exportTag " + p.state); }
+        result.tag = String(p.value);
+        p = domTryGet108(map,"EXPORT_MAP_CLASS");
+        if (p.state !== "SUPPORTED") { throw new Error("exportClass " + p.state); }
+        result.className = String(p.value);
+        if (result.tag !== "span" || result.className !== "stylefix-export-probe") {
+            throw new Error("map read-back mismatch tag=" + result.tag + " class=" + result.className);
+        }
+        if (!enumResult.complete) { throw new Error(enumResult.detail || "enumeration incomplete"); }
+        result.ok = true;
+        result.detail = "one planted map enumerated and read back";
+    } catch (e) {
+        result.ok = false;
+        result.detail = errorSummary(e);
+    } finally {
+        if (pd !== null) { try { pd.close(SaveOptions.NO); } catch (ignoreClose) {} }
+    }
+    return result;
+}
+
+function scanStyleExportTagMaps108(audit,candidates) {
+    var i, j, style, key, dep, p, enumResult, maps, detail;
+    for (i = 0; i < candidates.length; i++) {
+        style = candidates[i];
+        key = styleKey(style);
+        dep = audit.map[key];
+        if (dep === undefined) { continue; }
+        audit.exportAudit.stylesChecked++;
+
+        p = domTryGet108(style,"STYLE_EXPORT_TAG_MAPS");
+        if (p.state !== "SUPPORTED") {
+            audit.exportAudit.complete = false;
+            audit.exportAudit.mismatches.push(styleName(style) + ": styleExportTagMaps=" + p.state);
+            addGlobalAuditError(audit,"Style export tag maps for " + styleQualifiedPath(style),null);
+            dep.exportEnumeration = "state=" + p.state;
+            continue;
+        }
+
+        enumResult = exportMapCollection108(p.value,styleQualifiedPath(style),audit);
+        audit.exportAudit.lengthTotal += enumResult.length;
+        if (enumResult.count !== null && !isNaN(enumResult.count)) { audit.exportAudit.countTotal += enumResult.count; }
+        audit.exportAudit.enumeratedTotal += enumResult.items.length;
+        if (!enumResult.complete) {
+            audit.exportAudit.complete = false;
+            audit.exportAudit.mismatches.push(styleName(style) + ": " + enumResult.detail);
+        }
+
+        dep.exportEnumeration = "length=" + enumResult.length +
+            ";count=" + (enumResult.count === null ? "N/A" : enumResult.count) +
+            ";enumerated=" + enumResult.items.length +
+            ";complete=" + (enumResult.complete ? "YES" : "NO");
+        maps = enumResult.items;
+        for (j = 0; j < maps.length; j++) {
+            detail = exportMapDetail108(maps[j],j);
+            dep.exportMapCount++;
+            if (dep.exportDetails.length < 20) { dep.exportDetails.push(detail); }
+            addDependencyByKey(audit,key,"Style export tag map: " + detail);
+        }
+    }
+}
+
+function exportMapCollection108(collection,label,audit) {
+    var result = collectionItems108(collection,"StyleExportTagMaps " + label,audit,true);
+    return result;
+}
+
+function exportMapDetail108(map,index) {
+    var parts = [], p;
+    p = domTryGet108(map,"EXPORT_MAP_TYPE");
+    if (p.state === "SUPPORTED") { parts.push("type=" + String(p.value)); }
+    p = domTryGet108(map,"EXPORT_MAP_TAG");
+    if (p.state === "SUPPORTED") { parts.push("tag=" + String(p.value)); }
+    p = domTryGet108(map,"EXPORT_MAP_CLASS");
+    if (p.state === "SUPPORTED") { parts.push("class=" + String(p.value)); }
+    p = domTryGet108(map,"EXPORT_MAP_ATTRIBUTES");
+    if (p.state === "SUPPORTED" && String(p.value) !== "") { parts.push("attrs=" + String(p.value)); }
+    return parts.length > 0 ? parts.join("; ") : "map #" + index;
+}
+
+function exportMapAuditSummary108(exportAudit) {
+    var semantic = exportAudit.semantic || {ok:false,detail:"not run"};
+    return "complete=" + (exportAudit.complete ? "YES" : "NO") +
+        ";semantic=" + (semantic.ok ? "PASS" : "FAIL") +
+        ";semanticDetail=" + semantic.detail +
+        ";stylesChecked=" + exportAudit.stylesChecked +
+        ";lengthTotal=" + exportAudit.lengthTotal +
+        ";countTotal=" + exportAudit.countTotal +
+        ";enumeratedTotal=" + exportAudit.enumeratedTotal +
+        (exportAudit.mismatches.length > 0 ? ";mismatches=" + exportAudit.mismatches.join(" ~ ") : "");
+}

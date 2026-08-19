@@ -1,0 +1,7 @@
+ID,Control Class,Direct Runs,Expected Risk,Additional Acceptance
+E01,Formatting/export,0,LOW,Export Map Count = 0
+E02,Formatting/export,0,HIGH,Export Map Count >=1; EPUB span/class canary-e02-v108
+F05,Fingerprint,>=1,HIGH,Canonical Match Count = 0; only fillColor differs; recorded color pair differs
+F06,Fingerprint,>=1,HIGH,Canonical Match Count = 0; only appliedFont differs; recorded font pair differs
+I01,Dependency,0,HIGH,indexGenerationOptions.pageNumberStyle dependency >=1
+I02,Dependency,0,HIGH,PageReference.pageNumberStyleOverride dependency >=1

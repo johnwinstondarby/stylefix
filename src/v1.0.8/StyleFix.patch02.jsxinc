@@ -1,0 +1,350 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/02 */
+/* ---------- DOM contract audit ---------- */
+
+function safeAllCharacterStyles108(doc) {
+    var probe = domTryGet108(doc,"DOC_ALL_CHARACTER_STYLES"), all, out = [], i;
+    if (probe.state !== "SUPPORTED") {
+        throw new Error("Document.allCharacterStyles unavailable: " + probe.state + " " + probe.note);
+    }
+    all = probe.value;
+    try {
+        for (i = 0; i < all.length; i++) { out.push(all[i]); }
+    } catch (e) {
+        throw new Error("Could not enumerate allCharacterStyles: " + errorSummary(e));
+    }
+    return out;
+}
+
+function safeAllParagraphStyles108(doc) {
+    var probe = domTryGet108(doc,"DOC_ALL_PARAGRAPH_STYLES"), all, out = [], i;
+    if (probe.state !== "SUPPORTED") {
+        throw new Error("Document.allParagraphStyles unavailable: " + probe.state + " " + probe.note);
+    }
+    all = probe.value;
+    try {
+        for (i = 0; i < all.length; i++) { out.push(all[i]); }
+    } catch (e) {
+        throw new Error("Could not enumerate allParagraphStyles: " + errorSummary(e));
+    }
+    return out;
+}
+
+function bootCollection108(collection) {
+    var out = [], len = 0, i, item;
+    if (collection === null || collection === undefined) { return out; }
+    try { len = Number(collection.length); } catch (ignoreLen) { len = 0; }
+    if (isNaN(len) || len < 0) { len = 0; }
+    for (i = 0; i < len; i++) {
+        item = null;
+        try {
+            if (typeof collection.item === "function") { item = collection.item(i); }
+            else { item = collection[i]; }
+        } catch (ignoreItem) {
+            try { item = collection[i]; } catch (ignoreIndex) { item = null; }
+        }
+        if (item !== null && item !== undefined) { out.push(item); }
+    }
+    return out;
+}
+
+function firstBootText108(story) {
+    var p, items;
+    p = domTryGet108(story,"STORY_TEXTS");
+    if (p.state !== "SUPPORTED") { return null; }
+    items = bootCollection108(p.value);
+    return items.length > 0 ? items[0] : null;
+}
+
+function probeDomContract108(doc,allChar,allPara,candidates) {
+    var audit = {items:[],byCode:{},blockLow:false,blockReasons:[],fatal:false};
+    var reps = {}, stories = [], tables = [], cells = [], footnotes = [], maps = [];
+    var p, i, j, story, text, table, cell, note, col, style, opts, firstMap = null;
+    var code, entry, rep;
+
+    reps.Application = app;
+    reps.Document = doc;
+    reps.Style = firstValid106(allChar);
+    reps.CharacterStyle = reps.Style;
+    reps.ParagraphStyle = firstValid106(allPara);
+
+    p = domTryGet108(doc,"DOC_STORIES");
+    if (p.state === "SUPPORTED") { stories = bootCollection108(p.value); }
+    if (stories.length > 0) {
+        reps.Story = stories[0];
+        reps.Text = firstBootText108(stories[0]);
+        try {
+            var frameProbe = domTryGet108(stories[0],"STORY_TEXT_CONTAINERS");
+            var frameItems;
+            if (frameProbe.state === "SUPPORTED") {
+                frameItems = bootCollection108(frameProbe.value);
+                if (frameItems.length > 0) {
+                    reps.TextFrame = frameItems[0];
+                    reps.PageItem = frameItems[0];
+                    try {
+                        var parentPageProbe = domTryGet108(frameItems[0],"FRAME_PARENT_PAGE");
+                        if (parentPageProbe.state === "SUPPORTED" && parentPageProbe.value) {
+                            reps.Page = parentPageProbe.value;
+                        }
+                    } catch (ignoreParentPageRep) {}
+                }
+            }
+        } catch (ignoreFrameRep) {}
+        try {
+            if (reps.Text) {
+                var ipProbe = domTryGet108(reps.Text,"TEXT_INSERTION_POINTS");
+                var ipItems;
+                if (ipProbe.state === "SUPPORTED") {
+                    ipItems = bootCollection108(ipProbe.value);
+                    if (ipItems.length > 0) { reps.InsertionPoint = ipItems[0]; }
+                }
+                var charProbe = domTryGet108(reps.Text,"TEXT_CHARACTERS");
+                var charItems;
+                if (charProbe.state === "SUPPORTED") {
+                    charItems = bootCollection108(charProbe.value);
+                    if (charItems.length > 0) { reps.Character = charItems[0]; }
+                }
+            }
+        } catch (ignoreTextReps) {}
+        try {
+            for (i = 0; i < stories.length; i++) {
+                col = domTryGet108(stories[i],"STORY_TABLES");
+                if (col.state === "SUPPORTED") {
+                    tables = bootCollection108(col.value);
+                    if (tables.length > 0) { reps.Table = tables[0]; break; }
+                }
+            }
+        } catch (ignoreTableProbe) {}
+        try {
+            for (i = 0; i < stories.length; i++) {
+                col = domTryGet108(stories[i],"STORY_FOOTNOTES");
+                if (col.state === "SUPPORTED") {
+                    footnotes = bootCollection108(col.value);
+                    if (footnotes.length > 0) { reps.Footnote = footnotes[0]; break; }
+                }
+            }
+        } catch (ignoreFootProbe) {}
+    }
+
+    if (reps.Table) {
+        p = domTryGet108(reps.Table,"TABLE_CELLS");
+        if (p.state === "SUPPORTED") {
+            cells = bootCollection108(p.value);
+            if (cells.length > 0) { reps.Cell = cells[0]; }
+        }
+    }
+    if (reps.Cell) {
+        p = domTryGet108(reps.Cell,"CELL_TEXTS");
+        if (p.state === "SUPPORTED") {
+            col = bootCollection108(p.value);
+            if (col.length > 0) { reps.Text = col[0]; }
+        }
+    }
+    if (reps.Footnote) {
+        p = domTryGet108(reps.Footnote,"FOOTNOTE_TEXTS");
+        if (p.state === "SUPPORTED") {
+            col = bootCollection108(p.value);
+            if (col.length > 0) { reps.FootnoteText = col[0]; }
+        }
+    }
+
+    /* Find a real export map if the document contains one. */
+    for (i = 0; i < allChar.length && firstMap === null; i++) {
+        style = allChar[i];
+        if (!valid(style)) { continue; }
+        p = domTryGet108(style,"STYLE_EXPORT_TAG_MAPS");
+        if (p.state !== "SUPPORTED") { continue; }
+        try {
+            var mapProbeItems = bootCollection108(p.value);
+            if (mapProbeItems.length > 0) { firstMap = mapProbeItems[0]; }
+        } catch (ignoreMap) {}
+    }
+    if (firstMap !== null) { reps.StyleExportTagMap = firstMap; }
+
+    /* Book-scope representatives. */
+    p = domTryGet108(app,"APP_BOOKS");
+    if (p.state === "SUPPORTED") {
+        col = bootCollection108(p.value);
+        if (col.length > 0) {
+            reps.Book = col[0];
+            p = domTryGet108(col[0],"BOOK_CONTENTS");
+            if (p.state === "SUPPORTED") {
+                var bookContentItems = bootCollection108(p.value);
+                if (bookContentItems.length > 0) { reps.BookContent = bookContentItems[0]; }
+            }
+        }
+    }
+
+    /* Dependency surface representatives. */
+    p = domTryGet108(doc,"DOC_INDEX_GENERATION_OPTIONS");
+    if (p.state === "SUPPORTED") { reps.IndexOptions = p.value; }
+    p = domTryGet108(doc,"DOC_FOOTNOTE_OPTIONS");
+    if (p.state === "SUPPORTED") { reps.FootnoteOption = p.value; }
+    p = domTryGet108(doc,"DOC_ENDNOTE_OPTIONS");
+    if (p.state === "SUPPORTED") { reps.EndnoteOption = p.value; }
+
+    p = domTryGet108(doc,"DOC_TEXT_VARIABLES");
+    if (p.state === "SUPPORTED") {
+        col = bootCollection108(p.value);
+        if (col.length > 0) {
+            reps.TextVariable = col[0];
+            p = domTryGet108(col[0],"VARIABLE_OPTIONS");
+            if (p.state === "SUPPORTED") { reps.VariableOptions = p.value; }
+        }
+    }
+    p = domTryGet108(doc,"DOC_CROSS_REFERENCE_FORMATS");
+    if (p.state === "SUPPORTED") {
+        col = bootCollection108(p.value);
+        if (col.length > 0) { reps.CrossReferenceFormat = col[0]; }
+    }
+    p = domTryGet108(doc,"DOC_HYPERLINK_TEXT_SOURCES");
+    if (p.state === "SUPPORTED") {
+        col = bootCollection108(p.value);
+        if (col.length > 0) { reps.HyperlinkSource = col[0]; }
+    }
+    p = domTryGet108(doc,"DOC_TOC_STYLES");
+    if (p.state === "SUPPORTED") {
+        col = bootCollection108(p.value);
+        if (col.length > 0) {
+            reps.TOCStyle = col[0];
+            try {
+                p = domTryGet108(col[0],"TOC_STYLE_ENTRIES");
+                if (p.state === "SUPPORTED") {
+                    var tocEntries = bootCollection108(p.value);
+                    if (tocEntries.length > 0) { reps.TOCStyleEntry = tocEntries[0]; }
+                }
+            } catch (ignoreToc) {}
+        }
+    }
+    p = domTryGet108(doc,"DOC_INDEXES");
+    if (p.state === "SUPPORTED") {
+        col = bootCollection108(p.value);
+        if (col.length > 0) {
+            reps.Index = col[0];
+            try {
+                p = domTryGet108(col[0],"INDEX_ALL_TOPICS");
+                if (p.state === "SUPPORTED") {
+                    var topics = safeArrayLike(p.value);
+                    if (topics.length > 0) {
+                        reps.Topic = topics[0];
+                        p = domTryGet108(topics[0],"TOPIC_PAGE_REFERENCES");
+                        if (p.state === "SUPPORTED") {
+                            var refs = bootCollection108(p.value);
+                            if (refs.length > 0) { reps.PageReference = refs[0]; }
+                        }
+                    }
+                }
+            } catch (ignoreIndexRep) {}
+        }
+    }
+    p = domTryGet108(doc,"DOC_XML_IMPORT_MAPS");
+    if (p.state === "SUPPORTED") {
+        col = bootCollection108(p.value);
+        if (col.length > 0) { reps.XMLMap = col[0]; }
+    }
+    if (!reps.XMLMap) {
+        p = domTryGet108(doc,"DOC_XML_EXPORT_MAPS");
+        if (p.state === "SUPPORTED") {
+            col = bootCollection108(p.value);
+            if (col.length > 0) { reps.XMLMap = col[0]; }
+        }
+    }
+
+    /* Collection representative. */
+    p = domTryGet108(doc,"DOC_STORIES");
+    if (p.state === "SUPPORTED") { reps.Collection = p.value; }
+
+    for (code in DOM108) {
+        if (!DOM108.hasOwnProperty(code)) { continue; }
+        entry = DOM108[code];
+        rep = representativeForContract108(entry,reps);
+        addContractProbe108(audit,code,entry,rep);
+    }
+
+    /* Required document/fingerprint/export names must resolve when their class exists. */
+    for (i = 0; i < audit.items.length; i++) {
+        var item = audit.items[i];
+        if (!item.required) { continue; }
+        if (item.state === "FAILED" || item.state === "NOT_EXPOSED") {
+            audit.blockLow = true;
+            audit.blockReasons.push(item.code + "=" + item.state);
+            if (item.role === "USAGE" || item.role === "STYLE" || item.role === "COLLECTION") {
+                audit.fatal = true;
+            }
+        }
+    }
+    return audit;
+}
+
+function representativeForContract108(entry,reps) {
+    var s = entry.surface;
+    if (s === "Application") { return reps.Application || null; }
+    if (s === "Document") { return reps.Document || null; }
+    if (s === "Story") { return reps.Story || null; }
+    if (s === "Text") { return reps.Text || reps.FootnoteText || null; }
+    if (s === "Table") { return reps.Table || null; }
+    if (s === "Cell") { return reps.Cell || null; }
+    if (s === "Footnote") { return reps.Footnote || null; }
+    if (s === "CharacterStyle" || s === "Style") { return reps.CharacterStyle || null; }
+    if (s === "ParagraphStyle") { return reps.ParagraphStyle || null; }
+    if (s === "StyleExportTagMap") { return reps.StyleExportTagMap || null; }
+    if (s === "Collection") { return reps.Collection || null; }
+    if (s === "IndexOptions") { return reps.IndexOptions || null; }
+    if (s === "FootnoteOption") { return reps.FootnoteOption || null; }
+    if (s === "EndnoteOption") { return reps.EndnoteOption || null; }
+    if (s === "TextVariable") { return reps.TextVariable || null; }
+    if (s === "VariableOptions") { return reps.VariableOptions || null; }
+    if (s === "CrossReferenceFormat") { return reps.CrossReferenceFormat || null; }
+    if (s.indexOf("Hyperlink") >= 0) { return reps.HyperlinkSource || null; }
+    if (s === "TOCStyle") { return reps.TOCStyle || null; }
+    if (s === "TOCStyleEntry") { return reps.TOCStyleEntry || null; }
+    if (s === "Index") { return reps.Index || null; }
+    if (s === "Topic") { return reps.Topic || null; }
+    if (s === "PageReference") { return reps.PageReference || null; }
+    if (s === "Book") { return reps.Book || null; }
+    if (s === "BookContent") { return reps.BookContent || null; }
+    if (s.indexOf("XMLImportMap") >= 0) { return reps.XMLMap || null; }
+    if (s.indexOf("NestedStyle") >= 0 || s.indexOf("BuildingBlock") >= 0) { return null; }
+    if (s === "TextFrame") { return reps.TextFrame || null; }
+    if (s === "PageItem") { return reps.PageItem || reps.TextFrame || null; }
+    if (s === "Page") { return reps.Page || null; }
+    if (s === "InsertionPoint") { return reps.InsertionPoint || null; }
+    if (s === "Character/TextRange") { return reps.Character || reps.Text || null; }
+    if (s === "PageItem/Group/Character") { return reps.PageItem || reps.Character || null; }
+    if (s === "Object" || s === "ObjectSpecifier") { return reps.CharacterStyle || reps.Text || null; }
+    return null;
+}
+
+function addContractProbe108(audit,code,entry,obj) {
+    var probe;
+    if (obj === null || obj === undefined) {
+        probe = {state:"NO_INSTANCE",value:null,note:"No representative instance in this document."};
+    } else if (entry.kind === "method") {
+        probe = domTryMethod108(obj,code);
+    } else {
+        probe = domTryGet108(obj,code);
+    }
+    var item = {
+        code:code,
+        name:entry.name,
+        surface:entry.surface,
+        role:entry.role,
+        required:entry.required,
+        state:probe.state,
+        note:probe.note || ""
+    };
+    audit.items.push(item);
+    audit.byCode[code] = item;
+}
+
+function domContractSummary108(audit) {
+    var out = [], i, item;
+    if (!audit) { return ""; }
+    for (i = 0; i < audit.items.length; i++) {
+        item = audit.items[i];
+        if (!item.required && item.state === "NO_INSTANCE") { continue; }
+        out.push(item.code + "=" + item.state +
+            ";name=" + item.name + ";surface=" + item.surface +
+            ";role=" + item.role + ";required=" + (item.required ? "YES" : "NO"));
+    }
+    return out.join(" | ");
+}

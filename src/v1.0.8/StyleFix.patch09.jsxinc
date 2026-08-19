@@ -1,0 +1,220 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/09 */
+/* ---------- fingerprint schema and semantic discrimination ---------- */
+
+function fingerprintPropertyCandidates() {
+    return [
+        "appliedFont","fontStyle","pointSize","leading","tracking",
+        "appliedLanguage","capitalization","position","underline","strikeThru",
+        "noBreak","horizontalScale","verticalScale","baselineShift","skew",
+        "ligatures","otfFigureStyle","fillColor","fillTint","strokeColor",
+        "strokeTint","strokeWeight","overprintFill","overprintStroke"
+    ];
+}
+
+function fingerprintContractCode108(prop) {
+    var map = {
+        appliedFont:"FP_APPLIED_FONT",fontStyle:"FP_FONT_STYLE",pointSize:"FP_POINT_SIZE",
+        leading:"FP_LEADING",tracking:"FP_TRACKING",appliedLanguage:"FP_APPLIED_LANGUAGE",
+        capitalization:"FP_CAPITALIZATION",position:"FP_POSITION",underline:"FP_UNDERLINE",
+        strikeThru:"FP_STRIKE_THRU",noBreak:"FP_NO_BREAK",horizontalScale:"FP_HORIZONTAL_SCALE",
+        verticalScale:"FP_VERTICAL_SCALE",baselineShift:"FP_BASELINE_SHIFT",skew:"FP_SKEW",
+        ligatures:"FP_LIGATURES",otfFigureStyle:"FP_OTF_FIGURE_STYLE",fillColor:"FP_FILL_COLOR",
+        fillTint:"FP_FILL_TINT",strokeColor:"FP_STROKE_COLOR",strokeTint:"FP_STROKE_TINT",
+        strokeWeight:"FP_STROKE_WEIGHT",overprintFill:"FP_OVERPRINT_FILL",
+        overprintStroke:"FP_OVERPRINT_STROKE"
+    };
+    return map[prop] || "";
+}
+
+function validateFingerprintProperties108(styles,contractAudit) {
+    var requested = fingerprintPropertyCandidates(), active = [], warnings = [];
+    var i, code, probe, style = firstValid106(styles);
+    for (i = 0; i < requested.length; i++) {
+        code = fingerprintContractCode108(requested[i]);
+        if (code === "") {
+            warnings.push("Fingerprint property has no DOM contract: " + requested[i]);
+            continue;
+        }
+        probe = domTryGet108(style,code);
+        if (probe.state === "SUPPORTED") { active.push(requested[i]); }
+        else { warnings.push("Fingerprint property unavailable: " + requested[i] + "=" + probe.state); }
+    }
+    return {active:active,warnings:warnings};
+}
+
+function fingerprintDiscriminationProbe108() {
+    var result = {
+        ok:false,detail:"",tests:[],fontA:"",fontB:"",colorA:"",colorB:"",
+        languageA:"",languageB:""
+    };
+    var pd = null, styles, a, b, fonts, langs, swatches;
+    var pair, p1, p2;
+    try {
+        pd = app.documents.add(false);
+        styles = pd[domEntry108("DOC_CHARACTER_STYLES").name];
+        a = styles.add({name:"StyleFix Fingerprint Probe A"});
+        b = styles.add({name:"StyleFix Fingerprint Probe B"});
+
+        /* Scalar sanity checks use the same normalization path as real matching. */
+        a.pointSize = 11; b.pointSize = 12;
+        addFingerprintSemanticTest108(result,"pointSize",
+            normalizedProperty(a,"pointSize") !== normalizedProperty(b,"pointSize"),
+            normalizedProperty(a,"pointSize"),normalizedProperty(b,"pointSize"));
+        a.tracking = 0; b.tracking = 25;
+        addFingerprintSemanticTest108(result,"tracking",
+            normalizedProperty(a,"tracking") !== normalizedProperty(b,"tracking"),
+            normalizedProperty(a,"tracking"),normalizedProperty(b,"tracking"));
+
+        /* Fill/stroke color use two actual swatches, chosen by differing resolved names. */
+        swatches = collectionItems108(pd[domEntry108("DOC_SWATCHES").name],"Fingerprint swatches",null,false).items;
+        pair = findAssignableStylePair108(a,b,"fillColor",swatches);
+        if (pair === null) { throw new Error("Could not establish two distinguishable fillColor values."); }
+        result.colorA = pair.aName; result.colorB = pair.bName;
+        addFingerprintSemanticTest108(result,"fillColor",pair.distinct,pair.aValue,pair.bValue);
+
+        pair = findAssignableStylePair108(a,b,"strokeColor",swatches);
+        if (pair === null) { throw new Error("Could not establish two distinguishable strokeColor values."); }
+        addFingerprintSemanticTest108(result,"strokeColor",pair.distinct,pair.aValue,pair.bValue);
+
+        fonts = collectionItems108(app[domEntry108("APP_FONTS").name],"Application.fonts",null,false).items;
+        pair = findAssignableStylePair108(a,b,"appliedFont",fonts);
+        if (pair === null) { throw new Error("Could not establish two distinguishable appliedFont values."); }
+        result.fontA = pair.aName; result.fontB = pair.bName;
+        addFingerprintSemanticTest108(result,"appliedFont",pair.distinct,pair.aValue,pair.bValue);
+
+        try {
+            langs = collectionItems108(app[domEntry108("APP_LANGUAGES").name],"Application.languagesWithVendors",null,false).items;
+            pair = findAssignableStylePair108(a,b,"appliedLanguage",langs);
+            if (pair === null) { throw new Error("Could not establish two distinguishable appliedLanguage values."); }
+            result.languageA = pair.aName; result.languageB = pair.bName;
+            addFingerprintSemanticTest108(result,"appliedLanguage",pair.distinct,pair.aValue,pair.bValue);
+        } catch (eLang) {
+            addFingerprintSemanticTest108(result,"appliedLanguage",false,"","",errorSummary(eLang));
+        }
+
+        result.ok = fingerprintTestsPass108(result.tests);
+        result.detail = result.ok ? "critical fingerprint dimensions discriminate" : "one or more discrimination tests failed";
+    } catch (e) {
+        result.ok = false;
+        result.detail = errorSummary(e);
+    } finally {
+        if (pd !== null) { try { pd.close(SaveOptions.NO); } catch (ignoreClose) {} }
+    }
+    return result;
+}
+
+function findAssignableStylePair108(styleA,styleB,prop,values) {
+    var i, j, aValue, bValue, aName, bName;
+    domAssertRegisteredName108(prop);
+    for (i = 0; i < values.length; i++) {
+        for (j = i + 1; j < values.length; j++) {
+            try {
+                styleA[prop] = values[i];
+                styleB[prop] = values[j];
+                aValue = normalizedProperty(styleA,prop);
+                bValue = normalizedProperty(styleB,prop);
+                if (aValue !== "NOTHING" && bValue !== "NOTHING" && aValue !== bValue) {
+                    aName = objectDisplayName108(values[i]);
+                    bName = objectDisplayName108(values[j]);
+                    return {distinct:true,aValue:aValue,bValue:bValue,aName:aName,bName:bName};
+                }
+            } catch (ignorePair) {}
+        }
+    }
+    return null;
+}
+
+function objectDisplayName108(obj) {
+    var v;
+    if (obj === null || obj === undefined) { return ""; }
+    v = safeProperty(obj,"fullName",""); if (v !== "") { return v; }
+    v = safeProperty(obj,"untranslatedName",""); if (v !== "") { return v; }
+    v = safeProperty(obj,"name",""); if (v !== "") { return v; }
+    try { return String(obj); } catch (ignoreString) { return ""; }
+}
+
+function addFingerprintSemanticTest108(result,name,pass,aValue,bValue,note) {
+    result.tests.push({name:name,pass:pass === true,a:aValue || "",b:bValue || "",note:note || ""});
+}
+
+function fingerprintTestsPass108(tests) {
+    var i;
+    if (tests.length === 0) { return false; }
+    for (i = 0; i < tests.length; i++) { if (!tests[i].pass) { return false; } }
+    return true;
+}
+
+function fingerprintSemanticSummary108(result) {
+    var out = [], i, t;
+    if (!result) { return "NOT_RUN"; }
+    out.push("overall=" + (result.ok ? "PASS" : "FAIL"));
+    for (i = 0; i < result.tests.length; i++) {
+        t = result.tests[i];
+        out.push(t.name + "=" + (t.pass ? "PASS" : "FAIL") +
+            "[" + t.a + "<>" + t.b + "]" + (t.note ? "(" + t.note + ")" : ""));
+    }
+    if (result.fontA || result.fontB) { out.push("fontPair=" + result.fontA + " <> " + result.fontB); }
+    if (result.colorA || result.colorB) { out.push("colorPair=" + result.colorA + " <> " + result.colorB); }
+    if (result.languageA || result.languageB) { out.push("languagePair=" + result.languageA + " <> " + result.languageB); }
+    if (result.detail) { out.push("detail=" + result.detail); }
+    return out.join(" | ");
+}
+
+function normalizedProperty(obj,prop) {
+    var value, name;
+    domAssertRegisteredName108(prop);
+    try { value = obj[prop]; } catch (ignoreRead) { return "<unavailable>"; }
+    if (value === null || value === undefined || isNothingValue(value)) { return "NOTHING"; }
+
+    if (prop === "appliedFont") {
+        name = safeProperty(value,"fullName",""); if (name !== "") { return name; }
+        name = safeProperty(value,"name",""); if (name !== "") { return name; }
+        try { return String(value); } catch (ignoreFontString) { return "<unprintable>"; }
+    }
+    if (prop === "appliedLanguage") {
+        name = safeProperty(value,"icuLocaleName",""); if (name !== "") { return name; }
+        name = safeProperty(value,"untranslatedName",""); if (name !== "") { return name; }
+        name = safeProperty(value,"name",""); if (name !== "") { return name; }
+        try { return String(value); } catch (ignoreLanguageString) { return "<unprintable>"; }
+    }
+    if (prop === "fillColor" || prop === "strokeColor") {
+        name = safeProperty(value,"name",""); if (name !== "") { return name; }
+        name = safeProperty(value,"id",""); if (name !== "") { return "ID:" + name; }
+        try { return String(value); } catch (ignoreColorString) { return "<unprintable>"; }
+    }
+    try { if (value.constructor === Array) { return value.join("/"); } } catch (ignoreArray) {}
+    try { return String(value); } catch (ignoreString) { return "<unprintable>"; }
+}
+
+function formattingFingerprint(style) {
+    var parts = [], i;
+    if (!valid(style)) { return ""; }
+    for (i = 0; i < fingerprintProps.length; i++) {
+        parts.push(fingerprintProps[i] + "=" + normalizedProperty(style,fingerprintProps[i]));
+    }
+    return parts.join(";");
+}
+
+function hasSubstantiveFormatting(style) {
+    var i, value;
+    if (!valid(style)) { return false; }
+    for (i = 0; i < fingerprintProps.length; i++) {
+        try { value = style[fingerprintProps[i]]; } catch (ignore) { continue; }
+        if (value !== null && value !== undefined && !isNothingValue(value)) { return true; }
+    }
+    return false;
+}
+
+function equivalentCanonicalStyles(target,canonical) {
+    var matches = [], fp, i;
+    if (!hasSubstantiveFormatting(target)) { return matches; }
+    fp = formattingFingerprint(target);
+    if (fp === "") { return matches; }
+    for (i = 0; i < canonical.length; i++) {
+        if (!valid(canonical[i]) || sameStyle(canonical[i],target)) { continue; }
+        if (!hasSubstantiveFormatting(canonical[i])) { continue; }
+        if (formattingFingerprint(canonical[i]) === fp) { matches.push(canonical[i]); }
+    }
+    return matches;
+}
+

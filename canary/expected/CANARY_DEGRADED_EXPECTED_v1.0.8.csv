@@ -1,0 +1,2 @@
+ID,Control Class,Direct Runs,Expected Risk,Additional Acceptance
+M01,Degraded evidence,0,MEDIUM,BookScopeAcceptable=NO; LOW authorization AUTHORIZED=NO; book membership evidence names open INDB

@@ -1,0 +1,316 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/11 */
+/* ---------- UI / reporting ---------- */
+
+function buildUI() {
+    var buttons, button;
+    var props = {
+        multiselect:true,
+        numberOfColumns:14,
+        showHeaders:true,
+        columnTitles:["Risk","Style","Format","Runs","Story","Table","Nested","Foot","End","Over","Deps","Export","Relation","Pages"],
+        columnWidths:[60,210,90,48,48,48,48,48,48,48,48,55,145,190]
+    };
+
+    ui.win = new Window("palette","StyleFix v" + VERSION);
+    ui.win.orientation = "column";
+    ui.win.alignChildren = ["fill","top"];
+    ui.win.margins = 12;
+    ui.win.spacing = 8;
+
+    ui.title = ui.win.add("statictext",undefined,"Imported Character Style Debris Audit");
+    try { ui.title.graphics.font = ScriptUI.newFont(ui.title.graphics.font.name,"BOLD",15); } catch (ignoreFont) {}
+
+    ui.summary = ui.win.add("statictext",undefined,"",{multiline:true});
+    ui.summary.preferredSize = [1460,150];
+
+    ui.capabilities = ui.win.add("edittext",undefined,"",{multiline:true,readonly:true,scrolling:true});
+    ui.capabilities.preferredSize = [1460,220];
+
+    ui.list = ui.win.add("listbox",undefined,"",props);
+    ui.list.preferredSize = [1460,390];
+    ui.list.onDoubleClick = locateFirstUse;
+
+    ui.status = ui.win.add("statictext",undefined,"");
+    ui.status.preferredSize = [1460,34];
+
+    buttons = ui.win.add("group");
+    buttons.alignment = ["right","top"];
+    button = buttons.add("button",undefined,"Rescan"); button.onClick = scan;
+    button = buttons.add("button",undefined,"Record Assertion"); button.onClick = recordAssertion106;
+    button = buttons.add("button",undefined,"Locate First Use"); button.onClick = locateFirstUse;
+    button = buttons.add("button",undefined,"Save CSV"); button.onClick = saveCSV;
+    button = buttons.add("button",undefined,"Save Diagnostic"); button.onClick = saveDiagnostic108;
+    button = buttons.add("button",undefined,"Close"); button.onClick = function(){ui.win.close();};
+}
+
+function refresh108(doc) {
+    var i, row, item, rt = runtime108(), fixtureText, auth = state108().lowAuthorization;
+    ui.list.removeAll();
+    for (i = 0; i < rows.length; i++) {
+        row = rows[i];
+        item = ui.list.add("item",row.risk);
+        setSub(item,0,row.styleName);
+        setSub(item,1,row.formattingState);
+        setSub(item,2,row.directRuns);
+        setSub(item,3,row.storyRuns);
+        setSub(item,4,row.tableRuns);
+        setSub(item,5,row.nestedTableRuns);
+        setSub(item,6,row.footnoteRuns);
+        setSub(item,7,row.endnoteRuns);
+        setSub(item,8,row.oversetRuns);
+        setSub(item,9,row.dependencyCount);
+        setSub(item,10,row.exportMapCount);
+        setSub(item,11,row.usageRelationship);
+        setSub(item,12,row.pages || "-");
+    }
+
+    fixtureText = scanMeta.fixtureVersion !== "" ?
+        ("    Fixture: " + scanMeta.fixtureVersion + " schema " + scanMeta.fixtureSchema) :
+        "    Fixture: N/A";
+
+    ui.summary.text =
+        docName(doc) + "\n" +
+        "Runtime parity: " + rt.parity +
+        "    Loader: " + rt.loaderVersion +
+        "    Base: " + rt.baseVersion +
+        "    Patch chain: " + (rt.patchChain || rt.patchVersion) +
+        "    DOM contract: " + (rt.contractVersion || STYLEFIX_DOM_CONTRACT_VERSION) + fixtureText + "\n" +
+        "Character styles: " + counts.characterStyles +
+        "    Candidates: " + counts.candidateStyles +
+        "    Character Unnamed: " + counts.unnamedCharacterStyles +
+        "    Character Word Imported List: " + counts.wordListCharacterStyles +
+        "    Imported: " + counts.imported + "\n" +
+        "Paragraph styles: " + counts.paragraphStyles +
+        "    Paragraph Unnamed: " + counts.unnamedParagraphStyles +
+        "    Paragraph Word Imported List: " + counts.wordListParagraphStyles + "\n" +
+        "LOW: " + counts.low + "    MEDIUM: " + counts.medium +
+        "    HIGH: " + counts.high + "    REPLACE: " + counts.replace +
+        "    LOW Auth Schema: " + lowAuthSchema108() +
+        "    Authorized: " + (auth && auth.authorized ? "YES" : "NO") + "\n" +
+        "Usage warnings: " + counts.usageWarnings +
+        "    Dependency warnings: " + counts.dependencyWarnings +
+        "    Export scan: " + (counts.exportScanComplete ? "PASS" : "FAIL") +
+        "    Contract block: " + (counts.contractBlocksLow ? "YES" : "NO") +
+        "    Book scope: " + counts.bookScope;
+
+    ui.capabilities.text = capabilityPaletteText108(state108().traversalAudit) +
+        "\n\nDOM contract: " + (state108().contractAudit && !state108().contractAudit.blockLow ? "PASS" : "BLOCK") +
+        (scanMeta.domContractFailures ? "\n" + scanMeta.domContractFailures : "") +
+        "\n\nFingerprint semantic probe: " + scanMeta.fingerprintSemantic +
+        "\n\nExport-map audit: " + scanMeta.exportMapAuditSummary +
+        "\n\nInstance inventory: " + scanMeta.instanceInventorySummary;
+
+    try { ui.win.layout.layout(true); } catch (ignoreLayout) {}
+}
+
+function refresh(doc) { refresh108(doc); }
+
+function saveCSV() {
+    var doc, name, target, f, i, row;
+    if (app.documents.length === 0) { alert("No InDesign document is open."); return; }
+    if (scanMeta === null || counts === null) { alert("Run StyleFix before saving a CSV."); return; }
+
+    doc = app.activeDocument;
+    name = baseName(doc) + "_StyleFix_" + timestamp() + ".csv";
+    target = defaultFile(doc,name).saveDlg("Save StyleFix CSV","CSV:*.csv");
+    if (target === null) { return; }
+    if (!/\.csv$/i.test(target.name)) { target = new File(target.fsName + ".csv"); }
+
+    f = new File(target.fsName);
+    f.encoding = "UTF-8";
+    f.lineFeed = "Windows";
+    if (!f.open("w")) { alert("StyleFix could not open the selected file for writing."); return; }
+    f.write("\uFEFF");
+    writeProvenance(f);
+
+    f.writeln(csv([
+        "Risk","Family","Style Name","Style ID","Style Path","Imported","Based On",
+        "Formatting State","Semantic State","Usage Relationship",
+        "Direct Runs","Characters","Story Runs","Table Runs","Nested Table Runs",
+        "Footnote Runs","Endnote Runs","Overset Runs","Pages","Sample Text",
+        "Dependency Count","Dependencies","Export Map Count","Export Maps","Export Enumeration",
+        "Usage Warning Count","Usage Warnings","Dependency Warning Count","Dependency Warnings","Dependency N/A",
+        "Fingerprint Warning Count","Fingerprint Warnings","Canonical Match","Canonical Match Count",
+        "Delete After Replace Gate","Book Scope","Paragraph Unnamed Count","Paragraph Word Imported List Count",
+        "Suggested Action","Formatting Fingerprint"
+    ]));
+
+    for (i = 0; i < rows.length; i++) {
+        row = rows[i];
+        f.writeln(csv([
+            row.risk,row.family,row.styleName,row.styleId,row.stylePath,row.imported,row.basedOn,
+            row.formattingState,row.semanticState,row.usageRelationship,
+            row.directRuns,row.characters,row.storyRuns,row.tableRuns,row.nestedTableRuns,
+            row.footnoteRuns,row.endnoteRuns,row.oversetRuns,row.pages,row.samples,
+            row.dependencyCount,row.dependencies,row.exportMapCount,row.exportMaps,row.exportMapEnumeration,
+            row.usageWarningCount,row.usageWarnings,row.dependencyWarningCount,row.dependencyWarnings,row.dependencyNA,
+            row.fingerprintWarningCount,row.fingerprintWarnings,row.canonicalMatch,row.matchCount,
+            row.deleteAfterReplaceGate,row.bookScope,row.paragraphUnnamedCount,row.paragraphWordListCount,
+            row.suggestedAction,row.fingerprint
+        ]));
+    }
+    f.close();
+    status("CSV saved: " + target.fsName);
+    alert("StyleFix CSV saved.\n\n" + target.fsName);
+}
+
+function writeProvenance(f) {
+    f.writeln(csv(["# StyleFix Provenance","Value"]));
+    f.writeln(csv(["# Script Version",VERSION]));
+    f.writeln(csv(["# Release Tag",RELEASE_TAG]));
+    f.writeln(csv(["# Loader Version",scanMeta.loaderVersion]));
+    f.writeln(csv(["# Base Module Version",scanMeta.baseVersion]));
+    f.writeln(csv(["# Patch Version",scanMeta.patchVersion]));
+    f.writeln(csv(["# Patch Chain",scanMeta.patchChain]));
+    f.writeln(csv(["# DOM Contract Version",scanMeta.contractVersion]));
+    f.writeln(csv(["# Installed Artifact Parity",scanMeta.installedParity]));
+    f.writeln(csv(["# Installed Module Checks",scanMeta.moduleChecks]));
+    f.writeln(csv(["# Installed Script",scanMeta.installedFile]));
+    f.writeln(csv(["# Operating System",scanMeta.operatingSystem]));
+    f.writeln(csv(["# Run Timestamp",scanMeta.scanTimestamp]));
+    f.writeln(csv(["# Document Name",scanMeta.documentName]));
+    f.writeln(csv(["# Document File Modified",scanMeta.documentModified]));
+    f.writeln(csv(["# InDesign Version",scanMeta.indesignVersion]));
+    f.writeln(csv(["# InDesign Build",scanMeta.indesignBuild || "NOT_EXPOSED"]));
+    f.writeln(csv(["# Fixture Version",scanMeta.fixtureVersion || "N/A"]));
+    f.writeln(csv(["# Fixture Schema",scanMeta.fixtureSchema || "N/A"]));
+    f.writeln(csv(["# Fixture ID",scanMeta.fixtureId || "N/A"]));
+    f.writeln(csv(["# Fixture Expected Scanner",scanMeta.expectedScannerVersion || "N/A"]));
+    f.writeln(csv(["# Fixture Font Pair",scanMeta.fixtureFontPair || "N/A"]));
+    f.writeln(csv(["# Book Scope",scanMeta.bookScope]));
+    f.writeln(csv(["# Book Scope Method",scanMeta.bookMethod]));
+    f.writeln(csv(["# Candidate Families",FAMILY_TEXT]));
+    f.writeln(csv(["# DOM Contract",scanMeta.domContractSummary]));
+    f.writeln(csv(["# DOM Contract Blocks",scanMeta.domContractFailures || "NONE"]));
+    f.writeln(csv(["# Instance Inventory",scanMeta.instanceInventorySummary]));
+    f.writeln(csv(["# Traversal Capability Matrix",scanMeta.traversalCapabilitySummary]));
+    f.writeln(csv(["# Operator Usage Assertions",scanMeta.traversalAssertions || "NONE"]));
+    f.writeln(csv(["# Fingerprint Active Properties",scanMeta.fingerprintActive]));
+    f.writeln(csv(["# Fingerprint Dropped/Warnings",scanMeta.fingerprintWarnings || "NONE"]));
+    f.writeln(csv(["# Fingerprint Semantic Probe",scanMeta.fingerprintSemantic]));
+    f.writeln(csv(["# Usage Scan Warnings",scanMeta.usageWarnings || "NONE"]));
+    f.writeln(csv(["# Dependency Scan Warnings",scanMeta.dependencyWarnings || "NONE"]));
+    f.writeln(csv(["# Dependency N/A",scanMeta.dependencyNA || "NONE"]));
+    f.writeln(csv(["# Dependency Surfaces",scanMeta.dependencySurfaceSummary]));
+    f.writeln(csv(["# Export Map Audit",scanMeta.exportMapAuditSummary]));
+    f.writeln(csv(["# LOW Authorization Schema",scanMeta.lowAuthorizationSchema]));
+    f.writeln(csv(["# LOW Authorization Chain",scanMeta.lowAuthorizationSummary]));
+    f.writeln(csv(["# Risk Counts","LOW=" + counts.low + "; MEDIUM=" + counts.medium +
+        "; HIGH=" + counts.high + "; REPLACE=" + counts.replace]));
+    f.writeln(csv(["# Candidate Counts","Character=" + counts.candidateStyles +
+        "; Paragraph Unnamed=" + counts.unnamedParagraphStyles +
+        "; Paragraph Word Imported List=" + counts.wordListParagraphStyles]));
+    f.writeln("");
+}
+
+function saveDiagnostic108() {
+    var doc, name, target, f, i, item, audit, contract, rt;
+    if (app.documents.length === 0) { alert("No InDesign document is open."); return; }
+    if (scanMeta === null || counts === null) { alert("Run StyleFix before saving diagnostics."); return; }
+
+    doc = app.activeDocument;
+    name = baseName(doc) + "_StyleFix_Diagnostic_" + timestamp() + ".txt";
+    target = defaultFile(doc,name).saveDlg("Save StyleFix Diagnostic","Text:*.txt");
+    if (target === null) { return; }
+    if (!/\.txt$/i.test(target.name)) { target = new File(target.fsName + ".txt"); }
+
+    f = new File(target.fsName); f.encoding = "UTF-8"; f.lineFeed = "Windows";
+    if (!f.open("w")) { alert("StyleFix could not open the diagnostic file for writing."); return; }
+
+    rt = runtime108(); audit = state108().traversalAudit; contract = state108().contractAudit;
+    f.writeln("StyleFix Diagnostic");
+    f.writeln("===================");
+    f.writeln("Script version: " + VERSION);
+    f.writeln("Loader version: " + rt.loaderVersion);
+    f.writeln("Base module version: " + rt.baseVersion);
+    f.writeln("Patch chain: " + (rt.patchChain || rt.patchVersion));
+    f.writeln("DOM contract version: " + (rt.contractVersion || STYLEFIX_DOM_CONTRACT_VERSION));
+    f.writeln("Installed parity: " + rt.parity);
+    f.writeln("Module checks: " + rt.moduleChecks);
+    f.writeln("Installed script: " + rt.installedFile);
+    f.writeln("OS: " + scanMeta.operatingSystem);
+    f.writeln("InDesign version: " + scanMeta.indesignVersion);
+    f.writeln("InDesign build: " + (scanMeta.indesignBuild || "NOT_EXPOSED"));
+    f.writeln("Document: " + scanMeta.documentName);
+    f.writeln("Fixture version: " + (scanMeta.fixtureVersion || "N/A"));
+    f.writeln("Fixture schema: " + (scanMeta.fixtureSchema || "N/A"));
+    f.writeln("Fixture ID: " + (scanMeta.fixtureId || "N/A"));
+    f.writeln("Fixture expected scanner: " + (scanMeta.expectedScannerVersion || "N/A"));
+    f.writeln("Fixture font pair: " + (scanMeta.fixtureFontPair || "N/A"));
+    f.writeln("Book scope: " + scanMeta.bookScope);
+    f.writeln("Book scope method: " + scanMeta.bookMethod);
+    f.writeln("LOW authorization schema: " + scanMeta.lowAuthorizationSchema);
+    f.writeln("LOW authorization chain: " + scanMeta.lowAuthorizationSummary);
+    f.writeln("");
+
+    f.writeln("DOM Contract"); f.writeln("------------");
+    if (contract) {
+        for (i = 0; i < contract.items.length; i++) {
+            item = contract.items[i];
+            if (!item.required && item.state === "NO_INSTANCE") { continue; }
+            f.writeln(item.code + "\t" + item.state + "\tname=" + item.name +
+                "\tsurface=" + item.surface + "\trole=" + item.role +
+                "\trequired=" + (item.required ? "YES" : "NO") +
+                (item.note ? "\t" + item.note : ""));
+        }
+    }
+    f.writeln("Blocks: " + (scanMeta.domContractFailures || "NONE"));
+    f.writeln("");
+
+    f.writeln("Instance Inventory"); f.writeln("------------------");
+    f.writeln(scanMeta.instanceInventorySummary);
+    f.writeln("");
+
+    f.writeln("Traversal Capability Matrix"); f.writeln("---------------------------");
+    if (audit) {
+        for (i = 0; i < audit.items.length; i++) {
+            item = audit.items[i];
+            f.writeln(item.code + "\t" + item.state + "\tinstances=" + item.instances +
+                "\tcritical=" + (item.critical ? "YES" : "NO") +
+                "\tasserted=" + (item.assertion !== null ? "YES" : "NO") +
+                (item.note ? "\t" + item.note : ""));
+        }
+    }
+    f.writeln("");
+
+    f.writeln("Fingerprint Semantic Probe"); f.writeln("--------------------------");
+    f.writeln(scanMeta.fingerprintSemantic);
+    f.writeln("");
+    f.writeln("Dependency Surfaces"); f.writeln("-------------------");
+    f.writeln(scanMeta.dependencySurfaceSummary);
+    f.writeln("");
+    f.writeln("Export Map Audit"); f.writeln("----------------");
+    f.writeln(scanMeta.exportMapAuditSummary);
+    f.writeln("");
+    f.writeln("Warnings"); f.writeln("--------");
+    f.writeln("Usage: " + (scanMeta.usageWarnings || "NONE"));
+    f.writeln("Dependency: " + (scanMeta.dependencyWarnings || "NONE"));
+    f.writeln("Dependency N/A: " + (scanMeta.dependencyNA || "NONE"));
+    f.writeln("Fingerprint: " + (scanMeta.fingerprintWarnings || "NONE"));
+    f.writeln("");
+    f.writeln("Risk counts"); f.writeln("-----------");
+    f.writeln("LOW=" + counts.low + " MEDIUM=" + counts.medium + " HIGH=" + counts.high + " REPLACE=" + counts.replace);
+    f.close();
+    status("Diagnostic saved: " + target.fsName);
+    alert("StyleFix diagnostic saved.\n\n" + target.fsName);
+}
+
+function sanitizeControlString108(value) {
+    var s = String(value), out = "", i, code, ch;
+    for (i = 0; i < s.length; i++) {
+        code = s.charCodeAt(i); ch = s.charAt(i);
+        if (code === 9 || code === 10 || code === 13) { out += " "; }
+        else if (code < 32 || code === 127) { out += "\\u" + fourHex108(code); }
+        else { out += ch; }
+    }
+    return out;
+}
+
+function csv(values) {
+    var out = [], i, s;
+    for (i = 0; i < values.length; i++) {
+        s = sanitizeControlString108(values[i]).replace(/"/g,'""');
+        out.push('"' + s + '"');
+    }
+    return out.join(",");
+}

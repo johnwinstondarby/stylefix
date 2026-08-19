@@ -1,0 +1,171 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/04 */
+/* ---------- literal instance inventory ---------- */
+
+function inventoryInstances108(doc) {
+    var inv = {
+        stories:0, storyTextStyleRanges:0, storyTables:0, storyFootnotes:0,
+        storyTextContainers:0, tablesTotal:0, nestedTables:0, tableCells:0,
+        cellTexts:0, textTextStyleRanges:0, textFootnotes:0,
+        footnotes:0, footnoteTexts:0, endnoteStories:0, endnoteTextFrames:0,
+        errors:0, errorDetails:[], firstStory:null, firstTable:null, firstCell:null,
+        firstCellText:null, firstFootnote:null, firstFootnoteText:null
+    };
+    var p = domTryGet108(doc,"DOC_STORIES"), stories, i, story, res, texts, j;
+    if (p.state !== "SUPPORTED") {
+        inv.errors++;
+        inv.errorDetails.push("Document.stories=" + p.state);
+        return inv;
+    }
+    res = collectionItems108(p.value,"Document.stories",null,false);
+    stories = res.items;
+    inv.stories = res.length;
+    if (!res.complete) { inv.errors++; inv.errorDetails.push("Document.stories enumeration incomplete: " + res.detail); }
+    if (stories.length > 0) { inv.firstStory = stories[0]; }
+
+    for (i = 0; i < stories.length; i++) {
+        story = stories[i];
+        inventoryStory108(story,inv);
+    }
+
+    p = domTryGet108(doc,"DOC_ENDNOTE_TEXT_FRAMES");
+    if (p.state === "SUPPORTED") {
+        res = collectionItems108(p.value,"Document.endnoteTextFrames",null,false);
+        inv.endnoteTextFrames = res.length;
+        if (!res.complete) { inv.errors++; inv.errorDetails.push("endnoteTextFrames incomplete: " + res.detail); }
+    } else {
+        inv.errors++;
+        inv.errorDetails.push("Document.endnoteTextFrames=" + p.state);
+    }
+    return inv;
+}
+
+function inventoryStory108(story,inv) {
+    var p, res, i, tables, notes, containers;
+    if (!valid(story)) { return; }
+
+    p = domTryGet108(story,"STORY_TEXT_STYLE_RANGES");
+    if (p.state === "SUPPORTED") {
+        res = collectionItems108(p.value,"Story.textStyleRanges",null,false);
+        inv.storyTextStyleRanges += res.length;
+        if (!res.complete) { inv.errors++; inv.errorDetails.push("Story.textStyleRanges incomplete"); }
+    } else { inv.errors++; inv.errorDetails.push("Story.textStyleRanges=" + p.state); }
+
+    p = domTryGet108(story,"STORY_TEXT_CONTAINERS");
+    if (p.state === "SUPPORTED") {
+        res = collectionItems108(p.value,"Story.textContainers",null,false);
+        inv.storyTextContainers += res.length;
+    }
+
+    p = domTryGet108(story,"STORY_TABLES");
+    if (p.state === "SUPPORTED") {
+        res = collectionItems108(p.value,"Story.tables",null,false);
+        tables = res.items;
+        inv.storyTables += res.length;
+        inv.tablesTotal += res.length;
+        if (inv.firstTable === null && tables.length > 0) { inv.firstTable = tables[0]; }
+        for (i = 0; i < tables.length; i++) { inventoryTable108(tables[i],inv,1); }
+    } else { inv.errors++; inv.errorDetails.push("Story.tables=" + p.state); }
+
+    p = domTryGet108(story,"STORY_FOOTNOTES");
+    if (p.state === "SUPPORTED") {
+        res = collectionItems108(p.value,"Story.footnotes",null,false);
+        notes = res.items;
+        inv.storyFootnotes += res.length;
+        inv.footnotes += res.length;
+        if (inv.firstFootnote === null && notes.length > 0) { inv.firstFootnote = notes[0]; }
+        for (i = 0; i < notes.length; i++) { inventoryFootnote108(notes[i],inv); }
+    } else { inv.errors++; inv.errorDetails.push("Story.footnotes=" + p.state); }
+
+    try {
+        p = domTryGet108(story,"STORY_IS_ENDNOTE_STORY");
+        if (p.state === "SUPPORTED" && p.value === true) { inv.endnoteStories++; }
+        else if (p.state !== "SUPPORTED") {
+            p = domTryGet108(story,"STORY_TYPE");
+            if (p.state === "SUPPORTED" && StoryTypes !== undefined &&
+                p.value === StoryTypes.ENDNOTE_STORY) { inv.endnoteStories++; }
+        }
+    } catch (ignoreEndnote) {}
+}
+
+function inventoryTable108(table,inv,depth) {
+    var p = domTryGet108(table,"TABLE_CELLS"), res, cells, i, textProbe, textRes, text;
+    if (p.state !== "SUPPORTED") {
+        inv.errors++;
+        inv.errorDetails.push("Table.cells=" + p.state);
+        return;
+    }
+    res = collectionItems108(p.value,"Table.cells",null,false);
+    cells = res.items;
+    inv.tableCells += res.length;
+    if (inv.firstCell === null && cells.length > 0) { inv.firstCell = cells[0]; }
+    for (i = 0; i < cells.length; i++) {
+        textProbe = domTryGet108(cells[i],"CELL_TEXTS");
+        if (textProbe.state !== "SUPPORTED") {
+            inv.errors++;
+            inv.errorDetails.push("Cell.texts=" + textProbe.state);
+            continue;
+        }
+        textRes = collectionItems108(textProbe.value,"Cell.texts",null,false);
+        inv.cellTexts += textRes.length;
+        if (inv.firstCellText === null && textRes.items.length > 0) { inv.firstCellText = textRes.items[0]; }
+        var j;
+        for (j = 0; j < textRes.items.length; j++) {
+            text = textRes.items[j];
+            inventoryEmbeddedText108(text,inv,depth);
+        }
+    }
+}
+
+function inventoryEmbeddedText108(text,inv,depth) {
+    var p, res, tables, notes, i;
+    p = domTryGet108(text,"TEXT_TEXT_STYLE_RANGES");
+    if (p.state === "SUPPORTED") {
+        res = collectionItems108(p.value,"Text.textStyleRanges",null,false);
+        inv.textTextStyleRanges += res.length;
+    }
+    p = domTryGet108(text,"TEXT_TABLES");
+    if (p.state === "SUPPORTED") {
+        res = collectionItems108(p.value,"Text.tables",null,false);
+        tables = res.items;
+        inv.nestedTables += res.length;
+        inv.tablesTotal += res.length;
+        for (i = 0; i < tables.length; i++) { inventoryTable108(tables[i],inv,depth + 1); }
+    }
+    p = domTryGet108(text,"TEXT_FOOTNOTES");
+    if (p.state === "SUPPORTED") {
+        res = collectionItems108(p.value,"Text.footnotes",null,false);
+        notes = res.items;
+        inv.textFootnotes += res.length;
+        inv.footnotes += res.length;
+        for (i = 0; i < notes.length; i++) { inventoryFootnote108(notes[i],inv); }
+    }
+}
+
+function inventoryFootnote108(note,inv) {
+    var p = domTryGet108(note,"FOOTNOTE_TEXTS"), res;
+    if (p.state !== "SUPPORTED") {
+        inv.errors++;
+        inv.errorDetails.push("Footnote.texts=" + p.state);
+        return;
+    }
+    res = collectionItems108(p.value,"Footnote.texts",null,false);
+    inv.footnoteTexts += res.length;
+    if (inv.firstFootnoteText === null && res.items.length > 0) { inv.firstFootnoteText = res.items[0]; }
+}
+
+function inventorySummary108(inv) {
+    return "stories=" + inv.stories +
+        ";storyTextStyleRanges=" + inv.storyTextStyleRanges +
+        ";storyTables=" + inv.storyTables +
+        ";nestedTables=" + inv.nestedTables +
+        ";tablesTotal=" + inv.tablesTotal +
+        ";tableCells=" + inv.tableCells +
+        ";cellTexts=" + inv.cellTexts +
+        ";storyFootnotes=" + inv.storyFootnotes +
+        ";textFootnotes=" + inv.textFootnotes +
+        ";footnoteTexts=" + inv.footnoteTexts +
+        ";endnoteStories=" + inv.endnoteStories +
+        ";endnoteTextFrames=" + inv.endnoteTextFrames +
+        ";storyTextContainers=" + inv.storyTextContainers +
+        ";inventoryErrors=" + inv.errors;
+}

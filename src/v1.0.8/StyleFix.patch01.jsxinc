@@ -1,0 +1,404 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/01 */
+/* STYLEFIX_PATCH_VERSION: 1.0.8
+StyleFix v1.0.8 scanner/certification candidate.
+
+Audit only. No style deletion or replacement code is enabled.
+
+v1.0.8 goals:
+- make DOM names a declared and probed contract rather than call-site guesses;
+- repair styleExportTagMaps enumeration and make export completeness falsifiable;
+- correct Document.indexGenerationOptions dependency coverage;
+- prove object-valued fingerprint discrimination at runtime;
+- report literal document instance counts separately from capability states;
+- improve page/location resolution for tables, threaded stories, groups, anchors,
+  parent pages, overset text, and pasteboard stories;
+- make LOW Authorization Schema 2 evidence-bearing;
+- sanitize control characters in CSV preview text.
+*/
+
+var v108State;
+
+function state108() {
+    if (v108State === undefined || v108State === null) {
+        v108State = {
+            contractAudit:null,
+            contractEnforced:false,
+            traversalAudit:null,
+            inventory:null,
+            fingerprintSemantic:null,
+            lowAuthorization:null,
+            operatorAssertions:[]
+        };
+        try {
+            if (state106 && state106().operatorAssertions) {
+                v108State.operatorAssertions = state106().operatorAssertions;
+            }
+        } catch (ignore) {}
+    }
+    return v108State;
+}
+
+function runtime108() {
+    try {
+        if ($.global.__STYLEFIX_LOADER_RUNTIME) {
+            return $.global.__STYLEFIX_LOADER_RUNTIME;
+        }
+    } catch (ignore) {}
+    return {
+        loaderVersion:"unknown",
+        baseVersion:"unknown",
+        patchVersion:"unknown",
+        patchChain:"unknown",
+        contractVersion:"unknown",
+        parity:"UNKNOWN",
+        moduleChecks:"",
+        installedFile:""
+    };
+}
+
+function lowAuthSchema108() { return "2"; }
+
+function domGate108(code) {
+    var st = state108(), item;
+    if (!st.contractEnforced) { return; }
+    if (!st.contractAudit || !st.contractAudit.byCode) {
+        throw new Error("StyleFix DOM contract gate is active without a contract audit.");
+    }
+    item = st.contractAudit.byCode[code];
+    if (item === undefined) {
+        throw new Error("StyleFix DOM contract call was not probed: " + code);
+    }
+    if (item.state === "FAILED" || item.state === "NOT_EXPOSED") {
+        throw new Error("StyleFix DOM contract blocks " + code + ": " + item.state +
+            (item.note ? " | " + item.note : ""));
+    }
+    /* NO_INSTANCE means the active document supplied no representative.
+       It does not prohibit a later scratch probe or a newly created object.
+       The actual access remains guarded and any runtime failure is recorded. */
+    if (item.state === "NO_INSTANCE") { return; }
+}
+
+/* Legacy accessors now reject names that do not exist in the registry. */
+function propertyReadable(obj, prop) {
+    var value;
+    domAssertRegisteredName108(prop);
+    if (obj === null || obj === undefined) { return false; }
+    try { value = obj[prop]; return value !== undefined; } catch (ignore) { return false; }
+}
+
+function safePropertyObject(obj, prop) {
+    domAssertRegisteredName108(prop);
+    if (obj === null || obj === undefined) { return null; }
+    try { return obj[prop]; } catch (ignore) { return null; }
+}
+
+function safeProperty(obj, prop, fallback) {
+    domAssertRegisteredName108(prop);
+    if (obj === null || obj === undefined) { return fallback; }
+    try {
+        if (obj[prop] === null || obj[prop] === undefined) { return fallback; }
+        return String(obj[prop]);
+    } catch (ignore) { return fallback; }
+}
+
+function readableValue(obj, prop) {
+    var value;
+    domAssertRegisteredName108(prop);
+    if (!propertyReadable(obj,prop)) { return ""; }
+    try { value = obj[prop]; } catch (ignore) { return ""; }
+    if (value === null || value === undefined) { return ""; }
+    try { return String(value); } catch (ignoreString) { return ""; }
+}
+
+function safeAppProperty(prop) {
+    domAssertRegisteredName108(prop);
+    try {
+        if (app[prop] === undefined || app[prop] === null || String(app[prop]) === "") {
+            return "NOT_EXPOSED";
+        }
+        return String(app[prop]);
+    } catch (ignore) { return "NOT_EXPOSED"; }
+}
+
+function objectKey(obj) {
+    var spec, id, name;
+    if (obj === null || obj === undefined) { return ""; }
+    try {
+        if (typeof obj[domEntry108("OBJECT_TO_SPECIFIER").name] === "function") {
+            spec = String(obj[domEntry108("OBJECT_TO_SPECIFIER").name]());
+            if (spec !== "") { return spec; }
+        }
+    } catch (ignoreSpec) {}
+    try { id = String(obj[domEntry108("STYLE_ID").name]); } catch (ignoreId) { id = ""; }
+    try { name = String(obj[domEntry108("STYLE_NAME").name]); } catch (ignoreName) { name = ""; }
+    if (id !== "") { return objectTypeName(obj) + ":ID:" + id; }
+    if (name !== "") { return objectTypeName(obj) + ":NAME:" + name; }
+    return "";
+}
+
+function newCounts() {
+    return {
+        characterStyles:0, paragraphStyles:0, candidateStyles:0,
+        unnamedCharacterStyles:0, wordListCharacterStyles:0,
+        unnamedParagraphStyles:0, wordListParagraphStyles:0,
+        low:0, medium:0, high:0, replace:0,
+        directlyUsed:0, referenced:0, exportMapped:0, imported:0,
+        usageWarnings:0, dependencyWarnings:0, dependencyNA:0,
+        fingerprintWarnings:0, bookScope:"Standalone/No book evidence",
+        traversalBlocksLow:0, contractBlocksLow:0,
+        exportScanComplete:0
+    };
+}
+
+function newScanMeta(doc) {
+    var rt = runtime108();
+    return {
+        scanTimestamp:(new Date()).toString(),
+        documentName:docName(doc),
+        documentModified:fileModifiedText(doc),
+        indesignVersion:safeAppProperty("version"),
+        indesignBuild:safeAppProperty("buildNumber"),
+        operatingSystem:safeOs106(),
+        loaderVersion:rt.loaderVersion,
+        baseVersion:rt.baseVersion,
+        patchVersion:rt.patchVersion,
+        patchChain:rt.patchChain || rt.patchVersion,
+        contractVersion:rt.contractVersion || STYLEFIX_DOM_CONTRACT_VERSION,
+        installedParity:rt.parity,
+        moduleChecks:rt.moduleChecks,
+        installedFile:rt.installedFile,
+        fixtureVersion:"",
+        fixtureSchema:"",
+        fixtureId:"",
+        expectedScannerVersion:"",
+        fixtureFontPair:"",
+        bookScope:"",
+        bookMethod:"",
+        fingerprintActive:"",
+        fingerprintWarnings:"",
+        fingerprintSemantic:"",
+        usageWarnings:"",
+        dependencyWarnings:"",
+        dependencyNA:"",
+        dependencySurfaceSummary:"",
+        exportMapAuditSummary:"",
+        traversalCapabilitySummary:"",
+        traversalAssertions:"",
+        instanceInventorySummary:"",
+        domContractSummary:"",
+        domContractFailures:"",
+        lowAuthorizationSchema:lowAuthSchema108(),
+        lowAuthorizationSummary:""
+    };
+}
+
+function scan() {
+    var doc, allChar, allPara, candidates, canonical;
+    var usageAudit, depAudit, schemaAudit, bookAudit, census, capAudit, auth;
+    var contractAudit, inventory, semanticAudit;
+    var oldUnit = null;
+    var i, style, usage, deps, matches, risk, deletionGate, substantive, family;
+
+    if (app.documents.length === 0) {
+        rows = [];
+        refreshNoDocument();
+        alert("StyleFix v" + VERSION + "\n\nOpen an InDesign document before running StyleFix.");
+        return;
+    }
+
+    doc = app.activeDocument;
+    rows = [];
+    counts = newCounts();
+    scanMeta = newScanMeta(doc);
+    state108().contractEnforced = false;
+
+    try {
+        oldUnit = app.scriptPreferences.measurementUnit;
+        app.scriptPreferences.measurementUnit = MeasurementUnits.POINTS;
+    } catch (ignoreUnit) {}
+
+    try {
+        allChar = safeAllCharacterStyles108(doc);
+        allPara = safeAllParagraphStyles108(doc);
+        candidates = [];
+        canonical = [];
+
+        counts.characterStyles = allChar.length;
+        counts.paragraphStyles = allPara.length;
+
+        for (i = 0; i < allChar.length; i++) {
+            style = allChar[i];
+            if (!valid(style)) { continue; }
+            if (isAuditCandidate(style)) {
+                candidates.push(style);
+                family = candidateFamily(style);
+                if (family === "Unnamed Style") { counts.unnamedCharacterStyles++; }
+                if (family === "Word Imported List Style") { counts.wordListCharacterStyles++; }
+            }
+        }
+        counts.candidateStyles = candidates.length;
+
+        census = censusParagraphDebris(allPara);
+        counts.unnamedParagraphStyles = census.unnamed;
+        counts.wordListParagraphStyles = census.wordList;
+
+        status("Probing DOM contract...");
+        contractAudit = probeDomContract108(doc,allChar,allPara,candidates);
+        state108().contractAudit = contractAudit;
+        counts.contractBlocksLow = contractAudit.blockLow ? 1 : 0;
+        scanMeta.domContractSummary = domContractSummary108(contractAudit);
+        scanMeta.domContractFailures = contractAudit.blockReasons.join(" | ");
+        if (contractAudit.fatal) {
+            throw new Error("DOM contract fatal: " + contractAudit.blockReasons.join(" | "));
+        }
+        state108().contractEnforced = true;
+
+        status("Validating fingerprint schema...");
+        schemaAudit = validateFingerprintProperties108(allChar,contractAudit);
+        fingerprintProps = schemaAudit.active;
+        counts.fingerprintWarnings = schemaAudit.warnings.length;
+        scanMeta.fingerprintActive = fingerprintProps.join(" | ");
+        scanMeta.fingerprintWarnings = schemaAudit.warnings.join(" | ");
+
+        status("Proving fingerprint discrimination...");
+        semanticAudit = fingerprintDiscriminationProbe108();
+        state108().fingerprintSemantic = semanticAudit;
+        scanMeta.fingerprintSemantic = fingerprintSemanticSummary108(semanticAudit);
+
+        for (i = 0; i < allChar.length; i++) {
+            style = allChar[i];
+            if (valid(style) && isCanonicalCandidate(style)) { canonical.push(style); }
+        }
+
+        status("Counting document instances...");
+        inventory = inventoryInstances108(doc);
+        state108().inventory = inventory;
+        scanMeta.instanceInventorySummary = inventorySummary108(inventory);
+
+        status("Probing traversal capabilities...");
+        capAudit = probeTraversalCapabilities108(doc,inventory,contractAudit);
+        state108().traversalAudit = capAudit;
+        try { state106().traversalAudit = capAudit; } catch (ignore106) {}
+        counts.traversalBlocksLow = capAudit.blockLow ? 1 : 0;
+        scanMeta.traversalCapabilitySummary = capabilitySummary108(capAudit);
+
+        status("Scanning direct usage...");
+        usageAudit = buildUsageMap(doc,candidates,capAudit);
+
+        status("Indexing dependencies...");
+        depAudit = buildDependencyMap108(doc,candidates,allChar,contractAudit);
+        bookAudit = bookScopeState(doc);
+
+        auth = lowAuthorization108(usageAudit,depAudit,schemaAudit,semanticAudit,
+            bookAudit,capAudit,contractAudit);
+        state108().lowAuthorization = auth;
+        try { state106().lowAuthorization = auth; } catch (ignoreAuth106) {}
+
+        counts.usageWarnings = usageAudit.errors;
+        counts.dependencyWarnings = depAudit.errors;
+        counts.dependencyNA = depAudit.na.length;
+        counts.bookScope = bookAudit.label;
+        counts.exportScanComplete = depAudit.exportAudit.complete ? 1 : 0;
+
+        scanMeta.bookScope = bookAudit.label;
+        scanMeta.bookMethod = bookAudit.method;
+        scanMeta.usageWarnings = usageAudit.errorDetails.join(" | ");
+        scanMeta.dependencyWarnings = depAudit.errorDetails.join(" | ");
+        scanMeta.dependencyNA = depAudit.na.join(" | ");
+        scanMeta.dependencySurfaceSummary = dependencySurfaceSummary108(depAudit);
+        scanMeta.exportMapAuditSummary = exportMapAuditSummary108(depAudit.exportAudit);
+        scanMeta.traversalAssertions = assertionsSummary106(doc);
+        scanMeta.lowAuthorizationSchema = lowAuthSchema108();
+        scanMeta.lowAuthorizationSummary = lowAuthorizationSummary108(auth);
+        scanMeta.fixtureVersion = readDocLabel108(doc,"StyleFixFixtureVersion");
+        scanMeta.fixtureSchema = readDocLabel108(doc,"StyleFixFixtureSchema");
+        scanMeta.fixtureId = readDocLabel108(doc,"StyleFixFixtureId");
+        scanMeta.expectedScannerVersion = readDocLabel108(doc,"StyleFixExpectedScannerVersion");
+        scanMeta.fixtureFontPair = readDocLabel108(doc,"StyleFixFixtureFontPair");
+
+        for (i = 0; i < candidates.length; i++) {
+            style = candidates[i];
+            status("Auditing " + (i + 1) + " of " + candidates.length + ": " + styleName(style));
+
+            usage = usageAudit.map[styleKey(style)] || emptyUsage();
+            deps = depAudit.map[styleKey(style)] || emptyDependency108();
+            substantive = hasSubstantiveFormatting(style);
+            matches = substantive ? equivalentCanonicalStyles(style,canonical) : [];
+
+            risk = classifyRisk108(usage,deps,matches,auth);
+            deletionGate = deleteAfterReplaceGate108(risk,deps,auth);
+
+            if (usage.runs > 0) { counts.directlyUsed++; }
+            if (deps.count > 0) { counts.referenced++; }
+            if (deps.exportMapCount > 0) { counts.exportMapped++; }
+            if (importedState(style) === "Yes") { counts.imported++; }
+
+            if (risk === "LOW") { counts.low++; }
+            else if (risk === "MEDIUM") { counts.medium++; }
+            else if (risk === "HIGH") { counts.high++; }
+            else if (risk === "REPLACE") { counts.replace++; }
+
+            rows.push({
+                risk:risk,
+                family:candidateFamily(style),
+                styleName:styleName(style),
+                styleId:safeProperty(style,"id","-"),
+                stylePath:styleQualifiedPath(style),
+                imported:importedState(style),
+                basedOn:styleRefName(safePropertyObject(style,"basedOn")),
+                formattingState:substantive ? "SUBSTANTIVE" : "EMPTY SHELL",
+                semanticState:deps.exportMapCount > 0 ? "EXPORT-MAPPED" : "NO EXPORT MAP",
+                directRuns:usage.runs,
+                characters:usage.characters,
+                storyRuns:usage.storyRuns,
+                tableRuns:usage.tableRuns,
+                nestedTableRuns:usage.nestedTableRuns,
+                footnoteRuns:usage.footnoteRuns,
+                endnoteRuns:usage.endnoteRuns,
+                oversetRuns:usage.oversetRuns,
+                pages:usagePageText(usage),
+                samples:usage.samples.join(" | "),
+                firstUsage:usage.firstUsage,
+                firstPageRef:usage.firstPageRef,
+                firstPageSort:usage.firstPageSort,
+                dependencyCount:deps.count,
+                dependencies:deps.details.join(" | "),
+                exportMapCount:deps.exportMapCount,
+                exportMaps:deps.exportDetails.join(" | "),
+                exportMapEnumeration:deps.exportEnumeration || "",
+                usageRelationship:usageRelationship108(usage,deps),
+                canonicalMatch:matches.length === 1 ? styleName(matches[0]) :
+                    (matches.length > 1 ? joinStyleNames(matches) : ""),
+                matchCount:matches.length,
+                deleteAfterReplaceGate:deletionGate,
+                suggestedAction:suggestedAction108(risk,matches,deps,substantive,deletionGate),
+                fingerprint:formattingFingerprint(style),
+                usageWarningCount:usageAudit.errors,
+                usageWarnings:usageAudit.errorDetails.join(" | "),
+                dependencyWarningCount:depAudit.errors,
+                dependencyWarnings:depAudit.errorDetails.join(" | "),
+                dependencyNA:depAudit.na.join(" | "),
+                fingerprintWarningCount:schemaAudit.warnings.length,
+                fingerprintWarnings:schemaAudit.warnings.join(" | "),
+                bookScope:bookAudit.label,
+                paragraphUnnamedCount:census.unnamed,
+                paragraphWordListCount:census.wordList,
+                style:style
+            });
+        }
+
+        sortRows();
+        refresh108(doc);
+        status(rows.length > 0 ?
+            "Scan complete. Read the artifact, then save CSV/Diagnostic." :
+            "Scan complete. No candidate character styles were found.");
+    } catch (eScan) {
+        state108().contractEnforced = false;
+        status("Scan failed: " + errorSummary(eScan));
+        alert("StyleFix scan failed.\n\n" + errorSummary(eScan));
+    } finally {
+        if (oldUnit !== null) {
+            try { app.scriptPreferences.measurementUnit = oldUnit; } catch (ignoreRestore) {}
+        }
+    }
+}

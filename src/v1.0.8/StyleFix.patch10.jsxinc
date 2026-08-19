@@ -1,0 +1,207 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/10 */
+/* ---------- book scope via DOM contract ---------- */
+
+function bookScopeState(doc) {
+    var result = {
+        blocksLow:false,
+        label:"Standalone/No book evidence",
+        method:"No open book matched; no nearby .indb found"
+    };
+    var docProbe, booksProbe, booksEnum, book, contentsProbe, contentsEnum;
+    var contentProbe, docPath = "", contentPath = "", nearby, i, j;
+
+    docProbe = domTryGet108(doc,"DOC_FULL_NAME");
+    if (docProbe.state === "SUPPORTED") { docPath = filePathKey(docProbe.value); }
+
+    booksProbe = domTryGet108(app,"APP_BOOKS");
+    if (booksProbe.state !== "SUPPORTED") {
+        result.blocksLow = true;
+        result.label = "BOOK SCOPE UNAVAILABLE";
+        result.method = "Application.books=" + booksProbe.state +
+            (booksProbe.note ? ";" + booksProbe.note : "");
+        return result;
+    }
+
+    booksEnum = collectionItems108(booksProbe.value,"Application.books",null,false);
+    if (!booksEnum.complete) {
+        result.blocksLow = true;
+        result.label = "OPEN BOOK SCOPE UNCERTAIN";
+        result.method = "Application.books enumeration incomplete: " + booksEnum.detail;
+        return result;
+    }
+
+    for (i = 0; i < booksEnum.items.length; i++) {
+        book = booksEnum.items[i];
+        contentsProbe = domTryGet108(book,"BOOK_CONTENTS");
+        if (contentsProbe.state !== "SUPPORTED") {
+            result.blocksLow = true;
+            result.label = "OPEN BOOK SCOPE UNCERTAIN";
+            result.method = "Book.bookContents=" + contentsProbe.state +
+                (contentsProbe.note ? ";" + contentsProbe.note : "");
+            return result;
+        }
+        contentsEnum = collectionItems108(contentsProbe.value,"Book.bookContents",null,false);
+        if (!contentsEnum.complete) {
+            result.blocksLow = true;
+            result.label = "OPEN BOOK SCOPE UNCERTAIN";
+            result.method = "Book.bookContents enumeration incomplete: " + contentsEnum.detail;
+            return result;
+        }
+        for (j = 0; j < contentsEnum.items.length; j++) {
+            contentProbe = domTryGet108(contentsEnum.items[j],"BOOKCONTENT_FULL_NAME");
+            if (contentProbe.state !== "SUPPORTED") {
+                result.blocksLow = true;
+                result.label = "OPEN BOOK SCOPE UNCERTAIN";
+                result.method = "BookContent.fullName=" + contentProbe.state +
+                    (contentProbe.note ? ";" + contentProbe.note : "");
+                return result;
+            }
+            contentPath = filePathKey(contentProbe.value);
+            if (docPath !== "" && contentPath !== "" && docPath === contentPath) {
+                result.blocksLow = true;
+                result.label = "OPEN BOOK MEMBER: " + safeProperty(book,"name","book");
+                result.method = "Matched active document path to an open BookContent.fullName";
+                return result;
+            }
+        }
+    }
+
+    nearby = nearbyIndbFiles108(doc);
+    if (booksEnum.items.length === 0 && nearby.length > 0) {
+        result.blocksLow = true;
+        result.label = "POTENTIAL BOOK SCOPE: " + nearby.join(" | ") + " (not open)";
+        result.method = "Nearby .indb file(s) found; membership cannot be verified while closed";
+        return result;
+    }
+
+    if (booksEnum.items.length > 0) {
+        result.label = "Standalone/No open-book match";
+        result.method = "Open Book contents enumerated; active document path did not match";
+    }
+    return result;
+}
+
+function nearbyIndbFiles108(doc) {
+    var out = [], savedProbe, pathProbe, folder, files, i;
+    savedProbe = domTryGet108(doc,"DOC_SAVED");
+    if (savedProbe.state !== "SUPPORTED" || savedProbe.value !== true) { return out; }
+    pathProbe = domTryGet108(doc,"DOC_FILE_PATH");
+    if (pathProbe.state !== "SUPPORTED") { return out; }
+    folder = pathProbe.value;
+    try {
+        if (!folder || folder.exists !== true) { return out; }
+        files = folder.getFiles(function (f) {
+            return f instanceof File && /\.indb$/i.test(f.name);
+        });
+        for (i = 0; i < files.length && i < 10; i++) { out.push(files[i].name); }
+    } catch (ignoreFiles) {}
+    return out;
+}
+
+/* ---------- authorization / risk ---------- */
+
+function lowAuthorization108(usageAudit,depAudit,schemaAudit,semanticAudit,bookAudit,capAudit,contractAudit) {
+    var components = {
+        UsageTraversalComplete:authComponent108(
+            usageAudit.errors === 0 && !capAudit.blockLow,
+            "usageErrors=" + usageAudit.errors + ";traversalBlock=" + (capAudit.blockLow ? "YES" : "NO")),
+        DependencyScanComplete:authComponent108(
+            depAudit.errors === 0 && depAudit.contractBlocks.length === 0,
+            "dependencyErrors=" + depAudit.errors + ";surfaceBlocks=" + depAudit.contractBlocks.length),
+        FingerprintSchemaComplete:authComponent108(
+            schemaAudit.warnings.length === 0 && semanticAudit && semanticAudit.ok === true,
+            "schemaWarnings=" + schemaAudit.warnings.length +
+                ";semantic=" + (semanticAudit && semanticAudit.ok ? "PASS" : "FAIL")),
+        ExportMapScanComplete:authComponent108(
+            depAudit.exportAudit.complete === true && depAudit.exportAudit.semantic && depAudit.exportAudit.semantic.ok === true,
+            exportMapAuditSummary108(depAudit.exportAudit)),
+        BookScopeAcceptable:authComponent108(
+            !bookAudit.blocksLow,
+            bookAudit.label + ";" + bookAudit.method),
+        DOMContractComplete:authComponent108(
+            !contractAudit.blockLow,
+            contractAudit.blockLow ? contractAudit.blockReasons.join(" ~ ") : "required contracts supported or not instantiated")
+    };
+    var authorized = components.UsageTraversalComplete.ok &&
+        components.DependencyScanComplete.ok &&
+        components.FingerprintSchemaComplete.ok &&
+        components.ExportMapScanComplete.ok &&
+        components.BookScopeAcceptable.ok &&
+        components.DOMContractComplete.ok;
+    return {schema:lowAuthSchema108(),components:components,authorized:authorized};
+}
+
+function authComponent108(ok,evidence) { return {ok:ok === true,evidence:evidence || ""}; }
+
+function lowAuthorizationSummary108(auth) {
+    var order = [
+        "UsageTraversalComplete","DependencyScanComplete","FingerprintSchemaComplete",
+        "ExportMapScanComplete","BookScopeAcceptable","DOMContractComplete"
+    ];
+    var out = ["schema=" + auth.schema], i, name, c;
+    for (i = 0; i < order.length; i++) {
+        name = order[i]; c = auth.components[name];
+        out.push(name + "=" + (c.ok ? "YES" : "NO") + "[" + c.evidence + "]");
+    }
+    out.push("AUTHORIZED=" + (auth.authorized ? "YES" : "NO"));
+    return out.join(";");
+}
+
+function classifyRisk108(usage,deps,matches,auth) {
+    if (deps.count > 0) { return "HIGH"; }
+    if (usage.runs > 0) {
+        if (matches.length === 1 && auth.components.FingerprintSchemaComplete.ok) { return "REPLACE"; }
+        return "HIGH";
+    }
+    if (!auth.authorized) { return "MEDIUM"; }
+    return "LOW";
+}
+
+function deleteAfterReplaceGate108(risk,deps,auth) {
+    if (risk !== "REPLACE") { return "N/A"; }
+    if (!auth.authorized) {
+        return "BLOCKED: LOW authorization schema " + auth.schema + " is not satisfied";
+    }
+    if (deps.count > 0) { return "BLOCKED: dependencies remain"; }
+    return "ELIGIBLE ONLY AFTER VERIFIED REPLACEMENT + ZERO-REFERENCE RESCAN";
+}
+
+function suggestedAction108(risk,matches,deps,substantive,deletionGate) {
+    if (risk === "LOW") {
+        return substantive ? "Safe deletion candidate after selected re-check" :
+            "EMPTY SHELL formatting; safe deletion candidate after selected re-check";
+    }
+    if (risk === "MEDIUM") {
+        return substantive ? "LOW authorization incomplete; inspect evidence chain" :
+            "EMPTY SHELL formatting; LOW authorization incomplete";
+    }
+    if (risk === "REPLACE") {
+        return "Candidate replacement with " + styleName(matches[0]) + "; delete gate: " + deletionGate;
+    }
+    if (deps.exportMapCount > 0) { return "Preserve/review EPUB export mapping before any deletion"; }
+    if (deps.count > 0) { return "Resolve dependencies before deletion"; }
+    return "Review applied text before deletion";
+}
+
+function usageRelationship108(usage,deps) {
+    var joined;
+    if (usage.runs > 0 && deps.count > 0) {
+        joined = deps.details.join(" | ");
+        if (joined.indexOf("Footnote marker style") >= 0 || joined.indexOf("Hyperlink source") >= 0) {
+            return "INSTANTIATED DEPENDENCY";
+        }
+        return "DIRECT + DEPENDENCY";
+    }
+    if (usage.runs > 0) { return "DIRECT"; }
+    if (deps.count > 0) { return "DEPENDENCY ONLY"; }
+    return "NONE";
+}
+
+function readDocLabel108(doc,key) {
+    try {
+        if (typeof doc[domEntry108("DOC_EXTRACT_LABEL").name] === "function") {
+            return String(doc[domEntry108("DOC_EXTRACT_LABEL").name](key));
+        }
+    } catch (ignore) {}
+    return "";
+}

@@ -1,0 +1,127 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/06 */
+/* ---------- direct-usage traversal ---------- */
+
+function buildUsageMap(doc,candidates,capAudit) {
+    var audit = {map:{},lookup:buildCandidateLookup(candidates),errors:0,errorDetails:[],visited:{}};
+    var storiesProbe, storiesResult, stories, i, story, context;
+    for (i = 0; i < candidates.length; i++) { audit.map[styleKey(candidates[i])] = emptyUsage(); }
+
+    if (!capUsable108(capAudit,"DOCUMENT_STORIES")) { return audit; }
+    try {
+        storiesProbe = domGet108(doc,"DOC_STORIES");
+        storiesResult = collectionItems108(storiesProbe,"Document.stories",audit,true);
+        stories = storiesResult.items;
+    } catch (eStories) {
+        addGlobalAuditError(audit,"Document.stories",eStories);
+        return audit;
+    }
+
+    for (i = 0; i < stories.length; i++) {
+        story = stories[i];
+        if (!valid(story)) { continue; }
+        context = endnoteContext108(story,capAudit) ? "ENDNOTE" : "STORY";
+        scanTextContainer(story,
+            (context === "ENDNOTE" ? "Endnote story " : "Story ") + safeProperty(story,"id","#" + i),
+            audit,context,0,true,capAudit);
+    }
+    return audit;
+}
+
+function endnoteContext108(story,capAudit) {
+    var cap = capAudit.byCode.ENDNOTE_CLASSIFICATION, p;
+    if (!cap || cap.state !== "SUPPORTED") { return false; }
+    p = domTryGet108(story,"STORY_IS_ENDNOTE_STORY");
+    if (p.state === "SUPPORTED") { return p.value === true; }
+    p = domTryGet108(story,"STORY_TYPE");
+    try {
+        return p.state === "SUPPORTED" && StoryTypes !== undefined && p.value === StoryTypes.ENDNOTE_STORY;
+    } catch (ignore) { return false; }
+}
+
+function scanTextContainer(container,label,audit,context,tableDepth,scanNotes,capAudit) {
+    var key, p, result, ranges, tables, notes, i;
+    var textRangeCap, tableCap, footnoteCap, textRangeKey, tableKey, footnoteKey;
+    if (container === null || container === undefined || !valid(container)) { return; }
+
+    key = objectKey(container);
+    if (key !== "" && audit.visited[key] === true) { return; }
+    if (key !== "") { audit.visited[key] = true; }
+
+    if (context === "STORY" || context === "ENDNOTE") {
+        textRangeCap = "STORY_TEXT_STYLE_RANGES";
+        textRangeKey = "STORY_TEXT_STYLE_RANGES";
+        tableCap = "STORY_TABLES";
+        tableKey = "STORY_TABLES";
+        footnoteCap = "STORY_FOOTNOTES";
+        footnoteKey = "STORY_FOOTNOTES";
+    } else {
+        textRangeCap = "TEXT_TEXT_STYLE_RANGES";
+        textRangeKey = "TEXT_TEXT_STYLE_RANGES";
+        tableCap = "TEXT_TABLES";
+        tableKey = "TEXT_TABLES";
+        footnoteCap = "TEXT_FOOTNOTES";
+        footnoteKey = "TEXT_FOOTNOTES";
+    }
+
+    if (capUsable108(capAudit,textRangeCap)) {
+        try {
+            p = domGet108(container,textRangeKey);
+            result = collectionItems108(p,label + " textStyleRanges",audit,true);
+            ranges = result.items;
+            for (i = 0; i < ranges.length; i++) { recordUsageRange(ranges[i],audit,context,tableDepth); }
+        } catch (eRanges) { addGlobalAuditError(audit,label + " textStyleRanges",eRanges); }
+    }
+
+    if (capUsable108(capAudit,tableCap)) {
+        try {
+            p = domGet108(container,tableKey);
+            result = collectionItems108(p,label + " tables",audit,true);
+            tables = result.items;
+            for (i = 0; i < tables.length; i++) {
+                scanTable(tables[i],label + " table " + i,audit,tableDepth + 1,capAudit);
+            }
+        } catch (eTables) { addGlobalAuditError(audit,label + " tables",eTables); }
+    }
+
+    if (scanNotes === true && capUsable108(capAudit,footnoteCap)) {
+        try {
+            p = domGet108(container,footnoteKey);
+            result = collectionItems108(p,label + " footnotes",audit,true);
+            notes = result.items;
+            for (i = 0; i < notes.length; i++) {
+                scanNoteObject(notes[i],label + " footnote " + i,audit,"FOOTNOTE",tableDepth,capAudit);
+            }
+        } catch (eFootnotes) { addGlobalAuditError(audit,label + " footnotes",eFootnotes); }
+    }
+}
+
+function scanTable(table,label,audit,tableDepth,capAudit) {
+    var result, cells, i, p, texts, text;
+    if (!valid(table) || !capUsable108(capAudit,"TABLE_CELLS")) { return; }
+    try {
+        p = domGet108(table,"TABLE_CELLS");
+        result = collectionItems108(p,label + " cells",audit,true);
+        cells = result.items;
+        for (i = 0; i < cells.length; i++) {
+            if (!valid(cells[i]) || !capUsable108(capAudit,"CELL_TEXTS")) { continue; }
+            p = domGet108(cells[i],"CELL_TEXTS");
+            texts = collectionItems108(p,label + " cell " + i + " texts",audit,true).items;
+            if (texts.length > 0) {
+                text = texts[0];
+                scanTextContainer(text,label + " cell " + i,audit,"TABLE",tableDepth,true,capAudit);
+            }
+        }
+    } catch (eCells) { addGlobalAuditError(audit,label + " cells",eCells); }
+}
+
+function scanNoteObject(note,label,audit,context,tableDepth,capAudit) {
+    var p, texts;
+    if (!valid(note) || !capUsable108(capAudit,"FOOTNOTE_TEXTS")) { return; }
+    try {
+        p = domGet108(note,"FOOTNOTE_TEXTS");
+        texts = collectionItems108(p,label + " texts",audit,true).items;
+        if (texts.length > 0) {
+            scanTextContainer(texts[0],label,audit,context,tableDepth,true,capAudit);
+        }
+    } catch (eText) { addGlobalAuditError(audit,label + " text",eText); }
+}

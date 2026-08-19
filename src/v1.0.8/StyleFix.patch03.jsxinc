@@ -1,0 +1,69 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/03 */
+/* ---------- collection enumeration ---------- */
+
+function collectionItems108(collection,label,audit,strict) {
+    var result = {items:[],length:0,count:null,complete:true,detail:""};
+    var len, countProbe, i, item, errors = [];
+    if (collection === null || collection === undefined) {
+        result.complete = false;
+        result.detail = label + ": null collection";
+        if (audit && strict) { addGlobalAuditError(audit,label,null); }
+        return result;
+    }
+
+    try {
+        len = Number(collection[domEntry108("COLLECTION_LENGTH").name]);
+        if (isNaN(len) || len < 0) { throw new Error("non-numeric length"); }
+        result.length = len;
+    } catch (eLen) {
+        result.complete = false;
+        errors.push("length=" + errorSummary(eLen));
+        if (audit && strict) { addGlobalAuditError(audit,label + " length",eLen); }
+        result.detail = errors.join("; ");
+        return result;
+    }
+
+    try {
+        if (typeof collection[domEntry108("COLLECTION_COUNT").name] === "function") {
+            result.count = Number(collection[domEntry108("COLLECTION_COUNT").name]());
+            if (!isNaN(result.count) && result.count !== result.length) {
+                result.complete = false;
+                errors.push("count mismatch length=" + result.length + " count=" + result.count);
+            }
+        }
+    } catch (eCount) {
+        errors.push("count() unavailable: " + errorSummary(eCount));
+    }
+
+    for (i = 0; i < result.length; i++) {
+        item = null;
+        try {
+            if (typeof collection[domEntry108("COLLECTION_ITEM").name] !== "function") {
+                throw new Error("item() is not callable");
+            }
+            item = collection[domEntry108("COLLECTION_ITEM").name](i);
+            if (item === null || item === undefined) { throw new Error("item(" + i + ") returned null"); }
+            result.items.push(item);
+        } catch (eItem) {
+            result.complete = false;
+            errors.push("item(" + i + ")=" + errorSummary(eItem));
+            if (audit && strict) { addGlobalAuditError(audit,label + " item(" + i + ")",eItem); }
+        }
+    }
+
+    if (result.items.length !== result.length) {
+        result.complete = false;
+        errors.push("enumerated=" + result.items.length + " expected=" + result.length);
+    }
+    result.detail = errors.join("; ");
+    return result;
+}
+
+function arrayLikeItems108(value) {
+    var out = [], i;
+    if (value === null || value === undefined) { return out; }
+    try {
+        for (i = 0; i < value.length; i++) { out.push(value[i]); }
+    } catch (ignore) {}
+    return out;
+}

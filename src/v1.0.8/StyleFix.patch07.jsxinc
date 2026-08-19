@@ -1,0 +1,184 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/07 */
+/* ---------- location resolution ---------- */
+
+function pagesForText(text) {
+    var result = {names:[],firstPageRef:null,firstPageSort:999999998,overset:false};
+    var directFrames = [], endpoint, story, containers = [], i, p, res;
+
+    endpoint = endpointFrameInfo108(text);
+    result.overset = endpoint.overset;
+
+    p = domTryGet108(text,"TEXT_PARENT_TEXT_FRAMES");
+    if (p.state === "SUPPORTED") {
+        res = collectionItems108(p.value,"Text.parentTextFrames",null,false);
+        directFrames = res.items;
+        for (i = 0; i < directFrames.length; i++) { addPageFromFrame108(result,directFrames[i],0); }
+    }
+
+    for (i = 0; i < endpoint.frames.length; i++) { addPageFromFrame108(result,endpoint.frames[i],0); }
+
+    /* If direct resolution is absent or the range spans/overflows a story, use the
+       story's text containers to recover threaded/table/parent-page locations. */
+    if ((directFrames.length === 0 || endpoint.frames.length > 1) &&
+        (!endpoint.overset || endpoint.frames.length > 0)) {
+        p = domTryGet108(text,"TEXT_PARENT_STORY");
+        if (p.state === "SUPPORTED" && p.value) {
+            story = p.value;
+            p = domTryGet108(story,"STORY_TEXT_CONTAINERS");
+            if (p.state === "SUPPORTED") {
+                containers = collectionItems108(p.value,"Story.textContainers",null,false).items;
+                for (i = 0; i < containers.length; i++) { addPageFromFrame108(result,containers[i],0); }
+            }
+        }
+    }
+
+    if (result.overset && !containsString(result.names,"Overset/No page")) {
+        result.names.push("Overset/No page");
+    }
+    if (result.names.length === 0) {
+        result.names.push(result.overset ? "Overset/No page" : "Pasteboard/No page");
+    }
+    return result;
+}
+
+function endpointFrameInfo108(text) {
+    var info = {frames:[],firstHasFrame:false,lastHasFrame:false,overset:false};
+    var p, ips = [], first, last, res, i, story, overflows = false;
+    try {
+        p = domTryGet108(text,"TEXT_INSERTION_POINTS");
+        if (p.state === "SUPPORTED") {
+            res = collectionItems108(p.value,"Text.insertionPoints",null,false);
+            ips = res.items;
+        }
+    } catch (ignoreIps) {}
+
+    if (ips.length > 0) {
+        first = ips[0];
+        last = ips[ips.length - 1];
+        collectEndpointFrames108(first,info,true);
+        if (last !== first) { collectEndpointFrames108(last,info,false); }
+        else { info.lastHasFrame = info.firstHasFrame; }
+    }
+
+    p = domTryGet108(text,"TEXT_PARENT_STORY");
+    if (p.state === "SUPPORTED" && p.value) {
+        story = p.value;
+        p = domTryGet108(story,"STORY_OVERFLOWS");
+        if (p.state === "SUPPORTED") { overflows = p.value === true; }
+    }
+    info.overset = overflows && !info.lastHasFrame;
+    return info;
+}
+
+function collectEndpointFrames108(ip,info,isFirst) {
+    var p, frames, i, found = false;
+    if (!ip) { return; }
+    try {
+        p = domTryGet108(ip,"INSERTION_PARENT_TEXT_FRAMES");
+        if (p.state !== "SUPPORTED") { return; }
+        frames = collectionItems108(p.value,"InsertionPoint.parentTextFrames",null,false).items;
+        for (i = 0; i < frames.length; i++) {
+            if (!containsObject108(info.frames,frames[i])) { info.frames.push(frames[i]); }
+            if (frameHasResolvedPage108(frames[i])) { found = true; }
+        }
+    } catch (ignore) {}
+    if (isFirst) { info.firstHasFrame = found; }
+    else { info.lastHasFrame = found; }
+}
+
+function frameHasResolvedPage108(frame) {
+    var result = {names:[],firstPageRef:null,firstPageSort:999999998,overset:false};
+    addPageFromFrame108(result,frame,0);
+    return result.names.length > 0;
+}
+
+function addPageFromFrame108(result,frame,depth) {
+    var page, parent, type, p, frames, i;
+    if (frame === null || frame === undefined || depth > 12) { return; }
+
+    try {
+        page = frame[domEntry108("FRAME_PARENT_PAGE").name];
+        if (page !== null && page !== undefined && valid(page)) {
+            addPageObject108(result,page);
+            return;
+        }
+    } catch (ignoreParentPage) {}
+
+    type = objectTypeName(frame);
+    if (type === "Page") {
+        addPageObject108(result,frame);
+        return;
+    }
+
+    /* Anchored frames can be parented by a Character/InsertionPoint. */
+    try {
+        p = frame[domEntry108("OBJECT_PARENT").name];
+        parent = p;
+    } catch (ignoreParent) { parent = null; }
+    if (parent === null || parent === undefined || parent === frame) { return; }
+
+    type = objectTypeName(parent);
+    if (type === "Page") {
+        addPageObject108(result,parent);
+        return;
+    }
+
+    try {
+        if (parent[domEntry108("INSERTION_PARENT_TEXT_FRAMES").name] !== undefined) {
+            frames = collectionItems108(parent[domEntry108("INSERTION_PARENT_TEXT_FRAMES").name],
+                "Anchored parentTextFrames",null,false).items;
+            for (i = 0; i < frames.length; i++) { addPageFromFrame108(result,frames[i],depth + 1); }
+            if (frames.length > 0) { return; }
+        }
+    } catch (ignoreParentFrames) {}
+
+    addPageFromFrame108(result,parent,depth + 1);
+}
+
+function addPageObject108(result,page) {
+    var name, sort;
+    if (page === null || page === undefined || !valid(page)) { return; }
+    try { name = String(page[domEntry108("PAGE_NAME").name]); } catch (ignoreName) { return; }
+    if (!containsString(result.names,name)) { result.names.push(name); }
+    try {
+        sort = Number(page[domEntry108("PAGE_DOCUMENT_OFFSET").name]);
+        if (!isNaN(sort) && sort < result.firstPageSort) {
+            result.firstPageSort = sort;
+            result.firstPageRef = page;
+        }
+    } catch (ignoreSort) {}
+}
+
+function containsObject108(arr,obj) {
+    var i, key = objectKey(obj);
+    for (i = 0; i < arr.length; i++) {
+        if (arr[i] === obj) { return true; }
+        if (key !== "" && objectKey(arr[i]) === key) { return true; }
+    }
+    return false;
+}
+
+function isOversetRange(text) {
+    return endpointFrameInfo108(text).overset;
+}
+
+function previewText(value) {
+    var s = String(value), out = "", i, code, ch;
+    s = s.replace(/\u00A0/g," ");
+    for (i = 0; i < s.length; i++) {
+        code = s.charCodeAt(i);
+        ch = s.charAt(i);
+        if (code === 9 || code === 10 || code === 13) { out += " "; }
+        else if (code < 32 || code === 127) { out += "\\u" + fourHex108(code); }
+        else { out += ch; }
+    }
+    out = out.replace(/  +/g," ").replace(/^ +/,"").replace(/ +$/,"");
+    if (out.length > 140) { out = out.substring(0,137) + "..."; }
+    return out;
+}
+
+function fourHex108(n) {
+    var s = Number(n).toString(16).toUpperCase();
+    while (s.length < 4) { s = "0" + s; }
+    return s;
+}

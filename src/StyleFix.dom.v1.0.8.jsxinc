@@ -1,0 +1,298 @@
+/* STYLEFIX_DOM_CONTRACT_VERSION: 1.0.8
+StyleFix v1.0.8 DOM contract registry.
+
+All safety-relevant DOM property/method names used by the v1.0.8 scanner are
+registered here. New v1.0.8 code resolves names through domGet108/domCall108.
+Legacy helper accessors are wrapped by the v1.0.8 patch so an unregistered
+property name fails loudly instead of silently degrading evidence.
+*/
+
+var STYLEFIX_DOM_CONTRACT_VERSION = "1.0.8";
+var DOM108 = {};
+var DOM108_BY_NAME = {};
+
+function domRegister108(code, name, kind, surface, role, required) {
+    var entry = {
+        code:code,
+        name:name,
+        kind:kind || "property",
+        surface:surface || "",
+        role:role || "AUX",
+        required:required === true
+    };
+    DOM108[code] = entry;
+    if (DOM108_BY_NAME[name] === undefined) { DOM108_BY_NAME[name] = []; }
+    DOM108_BY_NAME[name].push(entry);
+}
+
+/* Application / document */
+domRegister108("APP_VERSION","version","property","Application","PROVENANCE",false);
+domRegister108("APP_BUILD_NUMBER","buildNumber","property","Application","PROVENANCE",false);
+domRegister108("APP_FONTS","fonts","property","Application","FINGERPRINT",true);
+domRegister108("APP_LANGUAGES","languagesWithVendors","property","Application","FINGERPRINT",false);
+domRegister108("APP_BOOKS","books","property","Application","BOOK",true);
+domRegister108("DOC_STORIES","stories","property","Document","USAGE",true);
+domRegister108("DOC_ALL_CHARACTER_STYLES","allCharacterStyles","property","Document","STYLE",true);
+domRegister108("DOC_CHARACTER_STYLES","characterStyles","property","Document","STYLE",true);
+domRegister108("DOC_ALL_PARAGRAPH_STYLES","allParagraphStyles","property","Document","STYLE",true);
+domRegister108("DOC_PARAGRAPH_STYLES","paragraphStyles","property","Document","STYLE",true);
+domRegister108("DOC_TEXT_VARIABLES","textVariables","property","Document","DEPENDENCY",true);
+domRegister108("DOC_CROSS_REFERENCE_FORMATS","crossReferenceFormats","property","Document","DEPENDENCY",true);
+domRegister108("DOC_HYPERLINK_TEXT_SOURCES","hyperlinkTextSources","property","Document","DEPENDENCY",true);
+domRegister108("DOC_CROSS_REFERENCE_SOURCES","crossReferenceSources","property","Document","DEPENDENCY",true);
+domRegister108("DOC_TOC_STYLES","tocStyles","property","Document","DEPENDENCY",true);
+domRegister108("DOC_FOOTNOTE_OPTIONS","footnoteOptions","property","Document","DEPENDENCY",true);
+domRegister108("DOC_ENDNOTE_OPTIONS","endnoteOptions","property","Document","DEPENDENCY",true);
+domRegister108("DOC_INDEX_GENERATION_OPTIONS","indexGenerationOptions","property","Document","DEPENDENCY",true);
+domRegister108("DOC_INDEXES","indexes","property","Document","DEPENDENCY",true);
+domRegister108("DOC_XML_IMPORT_MAPS","xmlImportMaps","property","Document","DEPENDENCY",true);
+domRegister108("DOC_XML_EXPORT_MAPS","xmlExportMaps","property","Document","DEPENDENCY",true);
+domRegister108("DOC_ENDNOTE_TEXT_FRAMES","endnoteTextFrames","property","Document","USAGE",true);
+domRegister108("DOC_FULL_NAME","fullName","property","Document","BOOK",false);
+domRegister108("DOC_EXTRACT_LABEL","extractLabel","method","Document","PROVENANCE",false);
+domRegister108("DOC_SWATCHES","swatches","property","Document","FINGERPRINT",true);
+domRegister108("DOC_SAVED","saved","property","Document","BOOK",false);
+domRegister108("DOC_FILE_PATH","filePath","property","Document","BOOK",false);
+domRegister108("BOOK_CONTENTS","bookContents","property","Book","BOOK",true);
+domRegister108("BOOK_NAME","name","property","Book","BOOK",false);
+domRegister108("BOOKCONTENT_FULL_NAME","fullName","property","BookContent","BOOK",true);
+
+/* Story / text traversal */
+domRegister108("STORY_TEXTS","texts","property","Story","USAGE",true);
+domRegister108("STORY_TEXT_STYLE_RANGES","textStyleRanges","property","Story","USAGE",true);
+domRegister108("STORY_TABLES","tables","property","Story","USAGE",true);
+domRegister108("STORY_FOOTNOTES","footnotes","property","Story","USAGE",true);
+domRegister108("STORY_IS_ENDNOTE_STORY","isEndnoteStory","property","Story","USAGE",false);
+domRegister108("STORY_TYPE","storyType","property","Story","USAGE",false);
+domRegister108("STORY_TEXT_CONTAINERS","textContainers","property","Story","LOCATION",true);
+domRegister108("STORY_OVERFLOWS","overflows","property","Story","LOCATION",true);
+domRegister108("TEXT_TEXT_STYLE_RANGES","textStyleRanges","property","Text","USAGE",true);
+domRegister108("TEXT_TABLES","tables","property","Text","USAGE",true);
+domRegister108("TEXT_FOOTNOTES","footnotes","property","Text","USAGE",true);
+domRegister108("TEXT_PARENT_TEXT_FRAMES","parentTextFrames","property","Text","LOCATION",true);
+domRegister108("TEXT_INSERTION_POINTS","insertionPoints","property","Text","LOCATION",true);
+domRegister108("TEXT_PARENT_STORY","parentStory","property","Text","LOCATION",true);
+domRegister108("TEXT_CHARACTERS","characters","property","Text","USAGE",true);
+domRegister108("TEXT_CONTENTS","contents","property","Text","USAGE",true);
+domRegister108("TABLE_CELLS","cells","property","Table","USAGE",true);
+domRegister108("CELL_TEXTS","texts","property","Cell","USAGE",true);
+domRegister108("FOOTNOTE_TEXTS","texts","property","Footnote","USAGE",true);
+domRegister108("FRAME_PARENT_PAGE","parentPage","property","TextFrame","LOCATION",true);
+domRegister108("FRAME_PARENT","parent","property","TextFrame","LOCATION",true);
+domRegister108("FRAME_PARENT_STORY","parentStory","property","TextFrame","LOCATION",true);
+domRegister108("OBJECT_PARENT","parent","property","PageItem/Group/Character","LOCATION",false);
+domRegister108("OBJECT_PARENT_PAGE","parentPage","property","PageItem","LOCATION",false);
+domRegister108("INSERTION_PARENT_TEXT_FRAMES","parentTextFrames","property","InsertionPoint","LOCATION",true);
+domRegister108("PAGE_NAME","name","property","Page","LOCATION",true);
+domRegister108("PAGE_DOCUMENT_OFFSET","documentOffset","property","Page","LOCATION",true);
+
+/* Style identity / usage */
+domRegister108("STYLE_NAME","name","property","Style","STYLE",true);
+domRegister108("STYLE_ID","id","property","Style","STYLE",true);
+domRegister108("STYLE_IMPORTED","imported","property","CharacterStyle","STYLE",false);
+domRegister108("STYLE_BASED_ON","basedOn","property","CharacterStyle","DEPENDENCY",true);
+domRegister108("CHAR_APPLIED_STYLE","appliedCharacterStyle","property","Character/TextRange","USAGE",true);
+domRegister108("STYLE_EXPORT_TAG_MAPS","styleExportTagMaps","property","CharacterStyle","EXPORT",true);
+
+/* Generic collection operations used where everyItem().getElements() is unsafe */
+domRegister108("COLLECTION_LENGTH","length","property","Collection","COLLECTION",true);
+domRegister108("COLLECTION_COUNT","count","method","Collection","COLLECTION",false);
+domRegister108("COLLECTION_ITEM","item","method","Collection","COLLECTION",true);
+domRegister108("COLLECTION_ADD","add","method","Collection","COLLECTION",false);
+domRegister108("COLLECTION_EVERY_ITEM","everyItem","method","Collection","COLLECTION",false);
+domRegister108("OBJECT_GET_ELEMENTS","getElements","method","ObjectSpecifier","COLLECTION",false);
+domRegister108("OBJECT_TO_SPECIFIER","toSpecifier","method","Object","IDENTITY",false);
+domRegister108("OBJECT_IS_VALID","isValid","property","Object","IDENTITY",false);
+domRegister108("OBJECT_FULL_NAME","fullName","property","Font/Document/File-like","IDENTITY",false);
+domRegister108("OBJECT_UNTRANSLATED_NAME","untranslatedName","property","Font/Language/NamedObject","IDENTITY",false);
+domRegister108("LANGUAGE_ICU_LOCALE_NAME","icuLocaleName","property","Language","FINGERPRINT",false);
+
+/* Export tag map */
+domRegister108("EXPORT_MAP_TYPE","exportType","property","StyleExportTagMap","EXPORT",true);
+domRegister108("EXPORT_MAP_TAG","exportTag","property","StyleExportTagMap","EXPORT",true);
+domRegister108("EXPORT_MAP_CLASS","exportClass","property","StyleExportTagMap","EXPORT",true);
+domRegister108("EXPORT_MAP_ATTRIBUTES","exportAttributes","property","StyleExportTagMap","EXPORT",true);
+
+/* Paragraph / dependency surfaces */
+domRegister108("PARA_DROP_CAP_STYLE","dropCapStyle","property","ParagraphStyle","DEPENDENCY",true);
+domRegister108("PARA_BULLETS_STYLE","bulletsCharacterStyle","property","ParagraphStyle","DEPENDENCY",true);
+domRegister108("PARA_NUMBERING_STYLE","numberingCharacterStyle","property","ParagraphStyle","DEPENDENCY",true);
+domRegister108("PARA_NESTED_STYLES","nestedStyles","property","ParagraphStyle","DEPENDENCY",true);
+domRegister108("PARA_NESTED_GREP_STYLES","nestedGrepStyles","property","ParagraphStyle","DEPENDENCY",true);
+domRegister108("PARA_NESTED_LINE_STYLES","nestedLineStyles","property","ParagraphStyle","DEPENDENCY",true);
+domRegister108("NESTED_APPLIED_CHARACTER_STYLE","appliedCharacterStyle","property","NestedStyle","DEPENDENCY",true);
+domRegister108("NESTED_APPLIED_STYLE","appliedStyle","property","NestedStyle/BuildingBlock","DEPENDENCY",false);
+domRegister108("VARIABLE_OPTIONS","variableOptions","property","TextVariable","DEPENDENCY",true);
+domRegister108("VARIABLE_APPLIED_STYLE","appliedStyle","property","VariableOptions","DEPENDENCY",true);
+domRegister108("CROSSREF_APPLIED_CHARACTER_STYLE","appliedCharacterStyle","property","CrossReferenceFormat","DEPENDENCY",true);
+domRegister108("CROSSREF_BUILDING_BLOCKS","buildingBlocks","property","CrossReferenceFormat","DEPENDENCY",true);
+domRegister108("SOURCE_APPLIED_CHARACTER_STYLE","appliedCharacterStyle","property","Hyperlink/CrossReferenceSource","DEPENDENCY",true);
+domRegister108("TOC_STYLE_ENTRIES","tocStyleEntries","property","TOCStyle","DEPENDENCY",true);
+domRegister108("TOC_PAGE_NUMBER_STYLE","pageNumberStyle","property","TOCStyleEntry","DEPENDENCY",true);
+domRegister108("TOC_SEPARATOR_STYLE","separatorStyle","property","TOCStyleEntry","DEPENDENCY",true);
+domRegister108("FOOTNOTE_MARKER_STYLE","footnoteMarkerStyle","property","FootnoteOption","DEPENDENCY",true);
+domRegister108("ENDNOTE_MARKER_STYLE","endnoteMarkerStyle","property","EndnoteOption","DEPENDENCY",true);
+domRegister108("INDEX_PAGE_NUMBER_STYLE","pageNumberStyle","property","IndexOptions","DEPENDENCY",true);
+domRegister108("INDEX_CROSS_REFERENCE_STYLE","crossReferenceStyle","property","IndexOptions","DEPENDENCY",true);
+domRegister108("INDEX_CROSS_REFERENCE_TOPIC_STYLE","crossReferenceTopicStyle","property","IndexOptions","DEPENDENCY",true);
+domRegister108("INDEX_ALL_TOPICS","allTopics","property","Index","DEPENDENCY",true);
+domRegister108("TOPIC_PAGE_REFERENCES","pageReferences","property","Topic","DEPENDENCY",true);
+domRegister108("PAGE_REFERENCE_STYLE_OVERRIDE","pageNumberStyleOverride","property","PageReference","DEPENDENCY",true);
+domRegister108("XML_MAPPED_STYLE","mappedStyle","property","XMLImportMap/XMLExportMap","DEPENDENCY",true);
+
+/* Fingerprint properties */
+domRegister108("FP_APPLIED_FONT","appliedFont","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_FONT_STYLE","fontStyle","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_POINT_SIZE","pointSize","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_LEADING","leading","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_TRACKING","tracking","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_APPLIED_LANGUAGE","appliedLanguage","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_CAPITALIZATION","capitalization","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_POSITION","position","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_UNDERLINE","underline","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_STRIKE_THRU","strikeThru","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_NO_BREAK","noBreak","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_HORIZONTAL_SCALE","horizontalScale","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_VERTICAL_SCALE","verticalScale","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_BASELINE_SHIFT","baselineShift","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_SKEW","skew","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_LIGATURES","ligatures","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_OTF_FIGURE_STYLE","otfFigureStyle","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_FILL_COLOR","fillColor","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_FILL_TINT","fillTint","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_STROKE_COLOR","strokeColor","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_STROKE_TINT","strokeTint","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_STROKE_WEIGHT","strokeWeight","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_OVERPRINT_FILL","overprintFill","property","CharacterStyle","FINGERPRINT",true);
+domRegister108("FP_OVERPRINT_STROKE","overprintStroke","property","CharacterStyle","FINGERPRINT",true);
+
+/* Names used by legacy helpers but not themselves release-gating contracts. */
+(function () {
+    var names = [
+        "modified","filePath","label","index","untranslatedName","fullName",
+        "parentPage","parentTextFrames","parentStory","textContainers","contents",
+        "characters","insertionPoints","name","id","imported","basedOn",
+        "appliedCharacterStyle","appliedStyle","styleExportTagMaps","exportType",
+        "exportTag","exportClass","exportAttributes","isValid","documentOffset",
+        "pageNumberStyle","separatorStyle","dropCapStyle","bulletsCharacterStyle",
+        "numberingCharacterStyle","nestedStyles","nestedGrepStyles","nestedLineStyles",
+        "variableOptions","buildingBlocks","tocStyleEntries","footnoteMarkerStyle",
+        "endnoteMarkerStyle","crossReferenceStyle","crossReferenceTopicStyle",
+        "allTopics","pageReferences","pageNumberStyleOverride","mappedStyle",
+        "fullName","textStyleRanges","tables","cells","texts","footnotes",
+        "isEndnoteStory","storyType","overflows","endnoteTextFrames",
+        "allCharacterStyles","allParagraphStyles","textVariables",
+        "crossReferenceFormats","hyperlinkTextSources","crossReferenceSources",
+        "tocStyles","footnoteOptions","endnoteOptions","indexGenerationOptions",
+        "indexes","xmlImportMaps","xmlExportMaps","stories","swatches","fonts",
+        "languagesWithVendors","version","buildNumber"
+    ];
+    var i;
+    for (i = 0; i < names.length; i++) {
+        if (DOM108_BY_NAME[names[i]] === undefined) {
+            domRegister108("LEGACY_" + i, names[i], "property", "Legacy", "AUX", false);
+        }
+    }
+}());
+
+function domEntry108(code) {
+    var entry = DOM108[code];
+    if (entry === undefined) {
+        throw new Error("StyleFix DOM contract error: unregistered contract key " + code);
+    }
+    return entry;
+}
+
+function domAssertRegisteredName108(name) {
+    if (DOM108_BY_NAME[name] === undefined) {
+        throw new Error("StyleFix DOM contract error: unregistered DOM name '" + name + "'");
+    }
+}
+
+function domGet108(obj, code) {
+    var entry = domEntry108(code);
+    if (entry.kind !== "property") {
+        throw new Error("StyleFix DOM contract error: " + code + " is not a property contract");
+    }
+    if (obj === null || obj === undefined) {
+        throw new Error("StyleFix DOM contract error: null object for " + code);
+    }
+    try { if (typeof domGate108 === "function") { domGate108(code); } } catch (eGate) { throw eGate; }
+    return obj[entry.name];
+}
+
+function domTryGet108(obj, code) {
+    var entry = domEntry108(code), value, n = 0, message = "";
+    if (entry.kind !== "property") {
+        return {state:"FAILED", value:null, note:"Contract is not a property."};
+    }
+    if (obj === null || obj === undefined) {
+        return {state:"NO_INSTANCE", value:null, note:"No representative object."};
+    }
+    try {
+        value = obj[entry.name];
+        if (value === undefined) {
+            return {state:"NOT_EXPOSED", value:null, note:"Property returned undefined."};
+        }
+        return {state:"SUPPORTED", value:value, note:""};
+    } catch (e) {
+        try { n = Number(e.number); } catch (ignoreN) {}
+        try { message = String(e.message || e); } catch (ignoreM) {}
+        if (n === 55 || message.indexOf("does not support") >= 0) {
+            return {state:"NOT_EXPOSED", value:null, note:message};
+        }
+        return {state:"FAILED", value:null, note:message};
+    }
+}
+
+function domCall108(obj, code, args) {
+    var entry = domEntry108(code), fn;
+    if (entry.kind !== "method") {
+        throw new Error("StyleFix DOM contract error: " + code + " is not a method contract");
+    }
+    if (obj === null || obj === undefined) {
+        throw new Error("StyleFix DOM contract error: null object for " + code);
+    }
+    try { if (typeof domGate108 === "function") { domGate108(code); } } catch (eGate) { throw eGate; }
+    fn = obj[entry.name];
+    if (typeof fn !== "function") {
+        throw new Error("StyleFix DOM contract error: method unavailable for " + code + " (" + entry.name + ")");
+    }
+    if (args === null || args === undefined) { args = []; }
+    return fn.apply(obj,args);
+}
+
+function domTryMethod108(obj, code) {
+    var entry = domEntry108(code), fn, n = 0, message = "";
+    if (entry.kind !== "method") {
+        return {state:"FAILED", value:null, note:"Contract is not a method."};
+    }
+    if (obj === null || obj === undefined) {
+        return {state:"NO_INSTANCE", value:null, note:"No representative object."};
+    }
+    try {
+        fn = obj[entry.name];
+        if (typeof fn !== "function") {
+            return {state:"NOT_EXPOSED", value:null, note:"Method is not callable."};
+        }
+        return {state:"SUPPORTED", value:fn, note:""};
+    } catch (e) {
+        try { n = Number(e.number); } catch (ignoreN) {}
+        try { message = String(e.message || e); } catch (ignoreM) {}
+        if (n === 55 || message.indexOf("does not support") >= 0) {
+            return {state:"NOT_EXPOSED", value:null, note:message};
+        }
+        return {state:"FAILED", value:null, note:message};
+    }
+}
+
+function domRegisteredSummary108() {
+    var out = [], code, entry;
+    for (code in DOM108) {
+        if (!DOM108.hasOwnProperty(code)) { continue; }
+        entry = DOM108[code];
+        if (entry.required) { out.push(code + "=" + entry.name + "@" + entry.surface); }
+    }
+    out.sort();
+    return out.join(" | ");
+}

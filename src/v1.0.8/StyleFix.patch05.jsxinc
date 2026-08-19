@@ -1,0 +1,195 @@
+/* STYLEFIX_PATCH_PART: 1.0.8/05 */
+/* ---------- traversal capability matrix ---------- */
+
+function probeTraversalCapabilities108(doc,inv,contractAudit) {
+    var audit = {items:[],byCode:{},blockLow:false,blockReasons:[]};
+    var stories = [], story = inv.firstStory, text = inv.firstCellText || inv.firstFootnoteText || null;
+    var p = domTryGet108(doc,"DOC_STORIES"), res;
+    if (p.state === "SUPPORTED") { stories = collectionItems108(p.value,"Document.stories",null,false).items; }
+
+    addTraversalCap108(audit,"DOCUMENT_STORIES","Document.stories",
+        p.state,inv.stories,true,p.note);
+
+    addTraversalProbe108(audit,"STORY_TEXT_STYLE_RANGES","Story.textStyleRanges",
+        story,"STORY_TEXT_STYLE_RANGES",inv.storyTextStyleRanges,true,
+        inv.stories === 0 ? "No story instances." : "");
+    addTraversalProbe108(audit,"STORY_TABLES","Story.tables",
+        story,"STORY_TABLES",inv.storyTables,true,
+        inv.stories === 0 ? "No story instances." : "");
+    addTraversalProbe108(audit,"STORY_FOOTNOTES","Story.footnotes",
+        story,"STORY_FOOTNOTES",inv.storyFootnotes,true,
+        inv.stories === 0 ? "No story instances." : "");
+    addTraversalProbe108(audit,"STORY_TEXT_CONTAINERS","Story.textContainers",
+        story,"STORY_TEXT_CONTAINERS",inv.storyTextContainers,true,
+        inv.stories === 0 ? "No story instances." : "");
+
+    if (story !== null) {
+        p = domTryGet108(story,"STORY_IS_ENDNOTE_STORY");
+        if (p.state === "SUPPORTED") {
+            addTraversalCap108(audit,"ENDNOTE_CLASSIFICATION","Story.isEndnoteStory",
+                "SUPPORTED",inv.endnoteStories,false,"");
+        } else {
+            p = domTryGet108(story,"STORY_TYPE");
+            addTraversalCap108(audit,"ENDNOTE_CLASSIFICATION","Story.storyType fallback",
+                p.state,inv.endnoteStories,false,
+                p.state === "SUPPORTED" ? "isEndnoteStory unavailable; storyType fallback." : p.note);
+        }
+    } else {
+        addTraversalCap108(audit,"ENDNOTE_CLASSIFICATION","Endnote story classification",
+            "NO_INSTANCE",0,false,"No story instances.");
+    }
+
+    addTraversalProbe108(audit,"TABLE_CELLS","Table.cells",
+        inv.firstTable,"TABLE_CELLS",inv.tableCells,true,
+        inv.tablesTotal === 0 ? "No table instances; parent inventory proves zero." : "");
+    addTraversalProbe108(audit,"CELL_TEXTS","Cell.texts",
+        inv.firstCell,"CELL_TEXTS",inv.cellTexts,true,
+        inv.tableCells === 0 ? "No cell instances; parent inventory proves zero." : "");
+    addTraversalProbe108(audit,"TEXT_TEXT_STYLE_RANGES","Text.textStyleRanges",
+        text,"TEXT_TEXT_STYLE_RANGES",inv.textTextStyleRanges,true,
+        inv.cellTexts === 0 && inv.footnoteTexts === 0 ? "No embedded text instances." : "");
+    addTraversalProbe108(audit,"TEXT_TABLES","Text.tables",
+        inv.firstCellText,"TEXT_TABLES",inv.nestedTables,true,
+        inv.cellTexts === 0 ? "No cell-text instances; nested-table count is zero." : "");
+    addTraversalProbe108(audit,"TEXT_FOOTNOTES","Text.footnotes",
+        inv.firstCellText || inv.firstFootnoteText,"TEXT_FOOTNOTES",inv.textFootnotes,true,
+        inv.cellTexts === 0 && inv.footnoteTexts === 0 ? "No embedded text instances." : "");
+    addTraversalProbe108(audit,"FOOTNOTE_TEXTS","Footnote.texts",
+        inv.firstFootnote,"FOOTNOTE_TEXTS",inv.footnoteTexts,true,
+        inv.footnotes === 0 ? "No footnote instances; parent inventory proves zero." : "");
+
+    p = domTryGet108(doc,"DOC_ENDNOTE_TEXT_FRAMES");
+    addTraversalCap108(audit,"ENDNOTE_TEXT_FRAMES","Document.endnoteTextFrames",
+        p.state,inv.endnoteTextFrames,false,p.note);
+    addEndnoteCoverage108(audit,doc,stories,inv,p);
+
+    if (inv.errors > 0) {
+        audit.blockLow = true;
+        audit.blockReasons.push("INSTANCE_INVENTORY_ERRORS=" + inv.errors);
+    }
+    finalizeTraversalGate108(audit);
+    return audit;
+}
+
+function addTraversalProbe108(audit,code,label,obj,contractCode,instances,critical,noInstanceNote) {
+    var p;
+    if (obj === null || obj === undefined) {
+        addTraversalCap108(audit,code,label,"NO_INSTANCE",instances,critical,
+            noInstanceNote || "No representative instance.");
+        return;
+    }
+    p = domTryGet108(obj,contractCode);
+    addTraversalCap108(audit,code,label,p.state,instances,critical,p.note);
+}
+
+function addTraversalCap108(audit,code,label,state,instances,critical,note) {
+    var assertion = null;
+    try { assertion = findAssertion106(app.activeDocument,code); } catch (ignore) {}
+    var item = {
+        code:code,label:label,state:state,instances:instances,
+        critical:critical === true,note:note || "",assertion:assertion
+    };
+    audit.items.push(item);
+    audit.byCode[code] = item;
+}
+
+function addEndnoteCoverage108(audit,doc,stories,inv,frameProbe) {
+    var frames, storyKeys = {}, i, frame, parentStory, key, uncovered = 0;
+    var classification = audit.byCode.ENDNOTE_CLASSIFICATION;
+
+    if (frameProbe.state === "SUPPORTED") {
+        frames = collectionItems108(frameProbe.value,"Document.endnoteTextFrames",null,false).items;
+        for (i = 0; i < stories.length; i++) {
+            key = objectKey(stories[i]);
+            if (key !== "") { storyKeys[key] = true; }
+        }
+        for (i = 0; i < frames.length; i++) {
+            frame = frames[i];
+            try { parentStory = frame[domEntry108("FRAME_PARENT_STORY").name]; }
+            catch (ignoreParentStory) { parentStory = null; }
+            key = objectKey(parentStory);
+            if (key === "" || storyKeys[key] !== true) { uncovered++; }
+        }
+        if (uncovered === 0) {
+            addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
+                "SUPPORTED",inv.endnoteTextFrames,true,
+                "Every exposed endnote text frame resolves to Document.stories.");
+        } else {
+            addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
+                "FAILED",inv.endnoteTextFrames,true,
+                uncovered + " endnote frame(s) do not resolve to scanned stories.");
+        }
+        return;
+    }
+
+    if (inv.endnoteStories === 0 && inv.endnoteTextFrames === 0) {
+        addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
+            "NO_INSTANCE",0,true,"No endnote instances were inventoried.");
+        return;
+    }
+    if (classification && classification.state === "SUPPORTED" && inv.endnoteStories > 0) {
+        addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
+            "SUPPORTED",inv.endnoteStories,true,
+            "Endnote stories are present in Document.stories; endnoteTextFrames unavailable.");
+        return;
+    }
+    addTraversalCap108(audit,"ENDNOTE_COVERAGE","Endnote usage coverage",
+        frameProbe.state === "FAILED" ? "FAILED" : "NOT_EXPOSED",
+        inv.endnoteTextFrames,true,"Endnote coverage cannot be established.");
+}
+
+function finalizeTraversalGate108(audit) {
+    var i, item;
+    for (i = 0; i < audit.items.length; i++) {
+        item = audit.items[i];
+        if (!item.critical) { continue; }
+        if (item.state === "SUPPORTED") { continue; }
+        if (item.state === "NO_INSTANCE" && Number(item.instances) === 0) { continue; }
+        if (item.assertion !== null) { continue; }
+        audit.blockLow = true;
+        if (!containsString(audit.blockReasons,item.code + "=" + item.state)) {
+            audit.blockReasons.push(item.code + "=" + item.state);
+        }
+    }
+}
+
+function capUsable108(audit,code) {
+    var item = audit && audit.byCode ? audit.byCode[code] : null;
+    return item !== null && item !== undefined && item.state === "SUPPORTED";
+}
+
+function capabilitySummary108(audit) {
+    var out = [], i, item, gate;
+    if (!audit) { return ""; }
+    for (i = 0; i < audit.items.length; i++) {
+        item = audit.items[i];
+        if (!item.critical) { gate = "INFO"; }
+        else if (item.state === "SUPPORTED" ||
+            (item.state === "NO_INSTANCE" && Number(item.instances) === 0) ||
+            item.assertion !== null) { gate = "ALLOW"; }
+        else { gate = "BLOCK"; }
+        out.push(item.code + "=" + item.state +
+            ";instances=" + item.instances +
+            ";gate=" + gate +
+            (item.assertion !== null ? ";asserted=yes" : ""));
+    }
+    return out.join(" | ");
+}
+
+function capabilityPaletteText108(audit) {
+    var lines = [], i, item, gate;
+    if (!audit) { return "Traversal capabilities: scan has not run."; }
+    lines.push("Traversal capability matrix (capability state and instance count are separate):");
+    for (i = 0; i < audit.items.length; i++) {
+        item = audit.items[i];
+        if (!item.critical) { gate = "INFO"; }
+        else if (item.state === "SUPPORTED" ||
+            (item.state === "NO_INSTANCE" && Number(item.instances) === 0) ||
+            item.assertion !== null) { gate = "ALLOW"; }
+        else { gate = "BLOCK"; }
+        lines.push(item.code + "  " + item.state + "  instances=" + item.instances +
+            "  " + gate + (item.assertion !== null ? "  ASSERTED" : ""));
+    }
+    if (audit.blockLow) { lines.push("LOW blocked by traversal: " + audit.blockReasons.join(", ")); }
+    return lines.join("\n");
+}
