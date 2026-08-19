@@ -17,10 +17,16 @@ function pagesForText(text) {
 
     for (i = 0; i < endpoint.frames.length; i++) { addPageFromFrame108(result,endpoint.frames[i],0); }
 
-    /* If direct resolution is absent or the range spans/overflows a story, use the
-       story's text containers to recover threaded/table/parent-page locations. */
-    if ((directFrames.length === 0 || endpoint.frames.length > 1) &&
-        (!endpoint.overset || endpoint.frames.length > 0)) {
+    /*
+       Direct parentTextFrames is the most precise route for a local range. Some
+       valid InDesign objects return an empty/unlocatable parent-frame array,
+       however, notably grouped, locked, anchored, threaded, and table-contained
+       text in the canary fixture. Story.textContainers is Adobe's authoritative
+       array of the frames/text paths that contain a Story. Use it when direct
+       resolution produced no page, or when the range demonstrably spans more
+       than one frame so intermediate threaded pages are not lost.
+    */
+    if (result.names.length === 0 || directFrames.length > 1 || endpoint.frames.length > 1) {
         p = domTryGet108(text,"TEXT_PARENT_STORY");
         if (p.state === "SUPPORTED" && p.value) {
             story = p.value;
@@ -96,13 +102,16 @@ function addPageFromFrame108(result,frame,depth) {
     var page, parent, type, p, frames, i;
     if (frame === null || frame === undefined || depth > 12) { return; }
 
-    try {
-        page = frame[domEntry108("FRAME_PARENT_PAGE").name];
+    /* PageItem.parentPage is the strongest direct location signal. The same
+       property is also exposed by Group and other page-item containers. */
+    p = domTryGet108(frame,"FRAME_PARENT_PAGE");
+    if (p.state === "SUPPORTED") {
+        page = p.value;
         if (page !== null && page !== undefined && valid(page)) {
             addPageObject108(result,page);
             return;
         }
-    } catch (ignoreParentPage) {}
+    }
 
     type = objectTypeName(frame);
     if (type === "Page") {
@@ -110,11 +119,12 @@ function addPageFromFrame108(result,frame,depth) {
         return;
     }
 
-    /* Anchored frames can be parented by a Character/InsertionPoint. */
-    try {
-        p = frame[domEntry108("OBJECT_PARENT").name];
-        parent = p;
-    } catch (ignoreParent) { parent = null; }
+    /* Anchored TextFrames can be parented by a Character. Groups can parent
+       TextFrames as well. Follow the generic parent chain, but first ask the
+       parent whether it directly identifies a page. */
+    p = domTryGet108(frame,"OBJECT_PARENT");
+    if (p.state === "SUPPORTED") { parent = p.value; }
+    else { parent = null; }
     if (parent === null || parent === undefined || parent === frame) { return; }
 
     type = objectTypeName(parent);
@@ -123,14 +133,23 @@ function addPageFromFrame108(result,frame,depth) {
         return;
     }
 
-    try {
-        if (parent[domEntry108("INSERTION_PARENT_TEXT_FRAMES").name] !== undefined) {
-            frames = collectionItems108(parent[domEntry108("INSERTION_PARENT_TEXT_FRAMES").name],
-                "Anchored parentTextFrames",null,false).items;
-            for (i = 0; i < frames.length; i++) { addPageFromFrame108(result,frames[i],depth + 1); }
-            if (frames.length > 0) { return; }
+    p = domTryGet108(parent,"OBJECT_PARENT_PAGE");
+    if (p.state === "SUPPORTED") {
+        page = p.value;
+        if (page !== null && page !== undefined && valid(page)) {
+            addPageObject108(result,page);
+            return;
         }
-    } catch (ignoreParentFrames) {}
+    }
+
+    /* Character and other text objects expose parentTextFrames. This is the
+       host-page route for anchored inline objects. */
+    p = domTryGet108(parent,"TEXT_PARENT_TEXT_FRAMES");
+    if (p.state === "SUPPORTED") {
+        frames = collectionItems108(p.value,"Anchored parentTextFrames",null,false).items;
+        for (i = 0; i < frames.length; i++) { addPageFromFrame108(result,frames[i],depth + 1); }
+        if (frames.length > 0 && result.names.length > 0) { return; }
+    }
 
     addPageFromFrame108(result,parent,depth + 1);
 }
