@@ -5,6 +5,12 @@
     if (DOM108["OWNER_PAGES"] === undefined) {
         domRegister108("OWNER_PAGES","pages","property","Spread/MasterSpread","LOCATION",false);
     }
+    if (DOM108["FRAME_ITEM_LAYER"] === undefined) {
+        domRegister108("FRAME_ITEM_LAYER","itemLayer","property","TextFrame/PageItem","LOCATION",false);
+    }
+    if (DOM108["LAYER_LOCKED"] === undefined) {
+        domRegister108("LAYER_LOCKED","locked","property","Layer","LOCATION",false);
+    }
 }());
 
 function pagesForText(text) {
@@ -21,17 +27,17 @@ function pagesForText(text) {
     if (p.state === "SUPPORTED") {
         res = collectionItems108(p.value,"Text.parentTextFrames",null,false);
         directFrames = res.items;
-        for (i = 0; i < directFrames.length; i++) { addPageFromFrame108(result,directFrames[i],0); }
+        for (i = 0; i < directFrames.length; i++) { addPageFromFrame108(result,directFrames[i],0,false); }
     }
 
-    for (i = 0; i < endpoint.frames.length; i++) { addPageFromFrame108(result,endpoint.frames[i],0); }
+    for (i = 0; i < endpoint.frames.length; i++) { addPageFromFrame108(result,endpoint.frames[i],0,false); }
 
     /*
        A TextStyleRange that covers an entire threaded story can still expose
        only the first frame through parentTextFrames and its endpoint insertion
        points. When the range covers the whole Story, enumerate Story.textContainers
-       so every threaded page carrying that range is reported. The same fallback
-       remains available when direct location resolution found no page.
+       so every threaded page carrying that range is reported. A multi-container
+       story supplies explicit ownership evidence for a null-parentPage frame.
     */
     if (story !== null &&
         (result.names.length === 0 || directFrames.length > 1 || endpoint.frames.length > 1 ||
@@ -39,7 +45,9 @@ function pagesForText(text) {
         p = domTryGet108(story,"STORY_TEXT_CONTAINERS");
         if (p.state === "SUPPORTED") {
             containers = collectionItems108(p.value,"Story.textContainers",null,false).items;
-            for (i = 0; i < containers.length; i++) { addPageFromFrame108(result,containers[i],0); }
+            for (i = 0; i < containers.length; i++) {
+                addPageFromFrame108(result,containers[i],0,containers.length > 1);
+            }
         }
     }
 
@@ -119,12 +127,21 @@ function collectEndpointFrames108(ip,info,isFirst) {
 
 function frameHasResolvedPage108(frame) {
     var result = {names:[],firstPageRef:null,firstPageSort:999999998,overset:false};
-    addPageFromFrame108(result,frame,0);
+    addPageFromFrame108(result,frame,0,false);
     return result.names.length > 0;
 }
 
-function addPageFromFrame108(result,frame,depth) {
-    var page, parent, type, p, frames, i;
+function frameLayerLocked108(frame) {
+    var p, q;
+    if (!frame) { return false; }
+    p = domTryGet108(frame,"FRAME_ITEM_LAYER");
+    if (p.state !== "SUPPORTED" || !p.value) { return false; }
+    q = domTryGet108(p.value,"LAYER_LOCKED");
+    return q.state === "SUPPORTED" && q.value === true;
+}
+
+function addPageFromFrame108(result,frame,depth,ownerEvidence) {
+    var page, parent, frameType, parentType, p, frames, i, allowOwner;
     if (frame === null || frame === undefined || depth > 12) { return; }
 
     p = domTryGet108(frame,"FRAME_PARENT_PAGE");
@@ -136,21 +153,23 @@ function addPageFromFrame108(result,frame,depth) {
         }
     }
 
-    type = objectTypeName(frame);
-    if (type === "Page") {
+    frameType = objectTypeName(frame);
+    if (frameType === "Page") {
         addPageObject108(result,frame);
         return;
     }
 
     /*
-       InDesign can return parentPage=null for valid page-owned items after
-       anchoring, grouping, layer locking, and in some threaded/master-page
-       contexts. The final location probe proved that their owning Spread or
-       MasterSpread still exposes the correct page collection. Resolve that
-       evidence only when ownership is unambiguous: one owner page, or multiple
-       parent pages whose visible page name is identical.
+       A bare Spread parent is insufficient evidence of page ownership because
+       pasteboard page items also belong to a Spread. Owner-page fallback is
+       permitted only when another DOM fact explains the null parentPage:
+       master-page ownership, a locked layer, a grouped/anchored host chain, or
+       a multi-container threaded Story.
     */
-    if (type === "Spread" || type === "MasterSpread") {
+    allowOwner = ownerEvidence === true || frameLayerLocked108(frame);
+    if (frameType === "MasterSpread") {
+        if (addPagesFromOwner108(result,frame)) { return; }
+    } else if (frameType === "Spread" && allowOwner) {
         if (addPagesFromOwner108(result,frame)) { return; }
     }
 
@@ -159,8 +178,8 @@ function addPageFromFrame108(result,frame,depth) {
     else { parent = null; }
     if (parent === null || parent === undefined || parent === frame) { return; }
 
-    type = objectTypeName(parent);
-    if (type === "Page") {
+    parentType = objectTypeName(parent);
+    if (parentType === "Page") {
         addPageObject108(result,parent);
         return;
     }
@@ -177,11 +196,12 @@ function addPageFromFrame108(result,frame,depth) {
     p = domTryGet108(parent,"TEXT_PARENT_TEXT_FRAMES");
     if (p.state === "SUPPORTED") {
         frames = collectionItems108(p.value,"Anchored parentTextFrames",null,false).items;
-        for (i = 0; i < frames.length; i++) { addPageFromFrame108(result,frames[i],depth + 1); }
+        for (i = 0; i < frames.length; i++) { addPageFromFrame108(result,frames[i],depth + 1,true); }
         if (frames.length > 0 && result.names.length > 0) { return; }
     }
 
-    addPageFromFrame108(result,parent,depth + 1);
+    addPageFromFrame108(result,parent,depth + 1,
+        allowOwner || parentType === "Group" || parentType === "Character");
 }
 
 function addPagesFromOwner108(result,owner) {
