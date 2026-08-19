@@ -13,7 +13,7 @@ For each suite member, use this order:
 5. StyleFix Diagnostic.
 6. Manual artifact review against the applicable expected-results matrix.
 
-If an earlier step fails, stop unless the suite explicitly defines a correction verifier for that exact failure. Later outputs are not release evidence for an unrelated failed control.
+If an earlier step fails, stop unless the suite explicitly defines a correction verifier or fixture cleanup for that exact failure. Later outputs are not release evidence for an unrelated failed control.
 
 ## Core fixture
 
@@ -46,9 +46,15 @@ The original supplemental builder's `isEmptyShell()` check compares direct Chara
 
 When the only builder failure is L01 with `emptyShell=NO;exportMaps=0`, run `canary/coverage/VerifyCoverage108_L01.jsx` against the generated supplemental INDD. The correction verifier compares L01 against E01 and a fresh transient empty CharacterStyle across the full StyleFix fingerprint surface and verifies zero export maps. A PASS replaces only the failed L01 builder assertion. All other builder controls must already be PASS.
 
+### D10 generated-index cleanup
+
+The D10 builder path generates an index so the page-reference override can be reacquired and verified after generation. In InDesign 21.5.1, removing the generated object can leave its page-number text behind as an overset Story. That contaminates D10 with one direct character-style use even though the acceptance contract requires D10 to remain dependency-only.
+
+If StyleFix reports `Unnamed Style D10` as `DIRECT + DEPENDENCY`, run `canary/coverage/RepairCoverage108_D10.jsx` against the generated supplemental INDD. The repair clears only the generated index-output Story after confirming it contains the D10 topic, verifies the underlying Index/Topic/PageReference dependency still points to `Unnamed Style D10`, saves the INDD, and re-exports the IDML. After the repair, rerun the supplemental IDML verifier and StyleFix scanner.
+
 ### Supplemental IDML verification
 
-Use `canary/verify/VerifySupplementalIDML108.py` for this fixture. The supplemental styles are named `F05 Match`, `F05 Miss`, `F06 Match`, and `F06 Miss`, so the core-oriented `VerifyCanaryIDML.py` is not the grading verifier for this fixture. The supplemental verifier independently confirms all four direct uses, E01/E02 export-map serialization, L01 zero-map serialization, and the F05/F06 serialized fingerprint discriminators.
+Use `canary/verify/VerifySupplementalIDML108.py` for this fixture. The supplemental styles are named `F05 Match`, `F05 Miss`, `F06 Match`, and `F06 Miss`, so the core-oriented `VerifyCanaryIDML.py` is not the grading verifier for this fixture. The supplemental verifier independently confirms all four positive direct uses, verifies D10 has zero serialized direct uses, checks E01/E02 export-map serialization and L01 zero-map serialization, and checks the F05/F06 serialized fingerprint discriminators.
 
 Expected results: `canary/expected/CANARY_SUPPLEMENTAL_EXPECTED_v1.0.8.csv`.
 
