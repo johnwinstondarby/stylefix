@@ -2,7 +2,7 @@
 
 StyleFix is an Adobe InDesign audit utility for examining imported and automatically generated character-style debris before any style is deleted or consolidated.
 
-**Stable audit scanner on `main`: v1.0.6. Development branch: `v1.0.8-dev`, audit only.** No StyleFix release currently deletes styles or rewrites text.
+**Stable audit scanner on `main`: v1.0.8, audit only.** No StyleFix v1 release deletes styles or rewrites text.
 
 The current candidate families are `Unnamed Style *` and `Word Imported List Style*`. For each candidate character style, StyleFix reports direct text use, location, dependency references, EPUB/HTML export mappings, formatting state, canonical-style matches, and a risk classification.
 
@@ -15,15 +15,16 @@ The current candidate families are `Unnamed Style *` and `Word Imported List Sty
 
 `EMPTY SHELL` and `SUBSTANTIVE` describe formatting state. A formatting-empty style can still carry export semantics.
 
-## v1.0.8 development focus
+## v1.0.8 release
 
-The first independently established canary scanner run found all difficult direct-use and dependency controls, but it also found one unsafe LOW classification: the planted E02 EPUB export mapping was missed. Manual review of the CSV exposed additional evidence-quality gaps. v1.0.8 addresses those as a class rather than adding isolated patches.
+v1.0.8 is the certified audit release of the v1 line. It closes the evidence-quality gaps found during independent canary testing of v1.0.6 and adds a visible pre-scan progress palette so the operator immediately sees that StyleFix is working.
 
-The development branch adds:
+The release includes:
 
-- a declared DOM contract registry and a static contract checker;
+- a declared DOM contract registry and static contract checker;
 - startup probing of required DOM contracts;
 - corrected `Document.indexGenerationOptions` dependency coverage;
+- page-reference override dependency coverage;
 - export-map enumeration using explicit length/count/item cross-checks plus a semantic scratch probe;
 - LOW Authorization Schema 2 with evidence text for every component;
 - fingerprint semantic discrimination probes for scalar, color, font, and language dimensions;
@@ -31,13 +32,14 @@ The development branch adds:
 - revised page/location resolution for threaded, table, parent-page, anchored, grouped, hidden, locked, pasteboard, and overset text;
 - printable sanitization of control characters in CSV samples;
 - explicit `NOT_EXPOSED` provenance instead of blank build metadata;
-- a multi-fixture canary suite.
+- a multi-fixture canary suite;
+- a standalone stage-aware progress palette for initial scans and rescans.
 
 ## DOM contract rule
 
 Safety-relevant DOM names are declared in `src/StyleFix.dom.v1.0.8.jsxinc`. v1.0.8 scanner code resolves those names through registered accessors. `tools/check_dom_contract.py` verifies that helper call sites use registered names, contract codes exist, historical wrong names do not reappear, and selected safety-critical members are not called directly.
 
-This is intended to prevent a recurring failure class in which a plausible but incorrect property or object relationship silently degrades evidence.
+This prevents a recurring failure class in which a plausible but incorrect property or object relationship silently degrades evidence.
 
 ## LOW Authorization Schema 2
 
@@ -54,39 +56,37 @@ Each component reports both a decision and supporting evidence. The schema numbe
 
 ## Canary suite
 
-The release gate uses independent measurements. Builder verification never calls StyleFix traversal code. IDML verification parses the exported IDML ZIP directly.
+The v1.0.8 release gate uses independent measurements. Builder verification never calls StyleFix traversal code. IDML verification parses the exported IDML ZIP directly.
 
-Current suite members:
+Certified suite members:
 
-- **Core fixture:** existing v1.0.7 fixture covering C01-C14, D01-D07, E01/E02, F01-F04, and P01.
-- **Supplemental coverage fixture:** `canary/coverage/BuildCoverage108.jsx`, covering E01/E02 export semantics, F05 fill-color discrimination, F06 applied-font discrimination, I01 index-generation dependency, and I02 page-reference override dependency.
-- **Degraded evidence fixture:** `canary/degraded/BuildDegraded108.jsx`, covering a deliberate MEDIUM result through open-book membership.
-- **Independent IDML verifier:** `canary/verify/VerifyCanaryIDML.py`.
+- **Core fixture:** v1.0.7 fixture covering C01-C14, D01-D07, E01/E02, F01-F04, and P01.
+- **Supplemental coverage fixture:** `canary/coverage/BuildCoverage108.jsx`, covering D08 running-header dependency, D09 index-generation dependency, D10 page-reference override dependency, E01/E02 export semantics, F05 fill-color discrimination, F06 applied-font discrimination, and L01 empty-shell authorization.
+- **Degraded evidence fixture:** `canary/degraded/BuildDegraded108.jsx`, proving an otherwise unused candidate is classified MEDIUM when the active document is an open-book member and `BookScopeAcceptable=NO`.
+- **Independent IDML verifiers:** `canary/verify/VerifyCanaryIDML.py` and `canary/verify/VerifySupplementalIDML108.py`.
 - **Expected matrices:** `canary/expected/`.
 - **Failure history:** `CANARY_FAILURES.csv`.
 
-Grade in fixed order: builder/read-back, IDML, StyleFix CSV, StyleFix Diagnostic, then manual artifact review. A PASS line is evidence; the CSV remains the instrument panel.
+Grade in fixed order: builder/read-back, documented correction verification where applicable, IDML, StyleFix CSV, StyleFix Diagnostic, then manual artifact review. A PASS line is evidence; the CSV remains the instrument panel.
 
-## Development installation
+## Installation
 
-The v1.0.8 development branch still uses modular packaging.
+v1.0.8 retains modular packaging.
 
 1. Close any running StyleFix palette.
 2. Delete the previously installed `src` folder from the InDesign Scripts Panel folder.
-3. Copy `StyleFix.jsx` and the complete `src` folder from the same checkout.
+3. Copy `StyleFix.jsx` and the complete `src` folder from the same release checkout.
 4. Run `StyleFix.jsx`.
 
 The loader reads module files before evaluation and refuses to run on an installed-artifact parity failure. Runtime provenance reports loader, base, patch chain, contract version, module checks, and installed file path.
 
-Single-file packaging is required before a public remediation release.
-
-## Stable reference
-
-`main` remains the last runnable audit state while v1.0.8 is developed on `v1.0.8-dev`. The stable `main` commit should receive an annotated Git tag before community-facing installation instructions point users at a fixed release artifact.
-
 ## Remediation policy
 
-Deletion and replacement remain disabled. Any future remediation release will be explicit, selection-based, revalidated immediately before mutation, verified afterward, and will not provide an unrestricted Delete All command.
+Deletion and replacement remain disabled in v1.0.8. Any future remediation release will be explicit, selection-based, revalidated immediately before mutation, verified afterward, and will not provide an unrestricted Delete All command.
+
+## v2.0 direction
+
+v2.0 development starts from the certified v1.0.8 audit baseline. The major-version boundary is reserved for guarded remediation and other behavior that changes StyleFix from evidence collection into an evidence-driven action tool.
 
 ## Development notes
 
