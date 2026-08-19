@@ -46,6 +46,10 @@ The original supplemental builder's `isEmptyShell()` check compares direct Chara
 
 When the only builder failure is L01 with `emptyShell=NO;exportMaps=0`, run `canary/coverage/VerifyCoverage108_L01.jsx` against the generated supplemental INDD. The correction verifier compares L01 against E01 and a fresh transient empty CharacterStyle across the full StyleFix fingerprint surface and verifies zero export maps. A PASS replaces only the failed L01 builder assertion. All other builder controls must already be PASS.
 
+### Supplemental IDML verification
+
+Use `canary/verify/VerifySupplementalIDML108.py` for this fixture. The supplemental styles are named `F05 Match`, `F05 Miss`, `F06 Match`, and `F06 Miss`, so the core-oriented `VerifyCanaryIDML.py` is not the grading verifier for this fixture. The supplemental verifier independently confirms all four direct uses, E01/E02 export-map serialization, L01 zero-map serialization, and the F05/F06 serialized fingerprint discriminators.
+
 Expected results: `canary/expected/CANARY_SUPPLEMENTAL_EXPECTED_v1.0.8.csv`.
 
 ## Degraded-evidence fixture
