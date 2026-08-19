@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Static guard for StyleFix v1.0.8 DOM contract discipline.
+"""Static guard for StyleFix v1.0.8 DOM-contract and bootstrap discipline.
 
-This is intentionally conservative. It checks that:
+Checks that:
 - every literal property passed to legacy accessor helpers is registered;
 - every v1.0.8 domGet/domCall contract code is declared;
 - historically wrong names do not reappear;
-- safety-critical DOM names are not accessed directly with dot syntax in the
-  v1.0.8 scanner patch. Access must flow through registered wrappers or a
-  dynamic property that is first checked by domAssertRegisteredName108.
+- safety-critical DOM names are not accessed directly in the v1.0.8 patch;
+- the legacy base bootstrap is removed and restarted only after contract/patch
+  initialization has been appended to the assembled program.
 
 The checker is part of the release gate, not runtime evidence.
 """
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -135,6 +134,24 @@ def main() -> int:
     if "domAssertRegisteredName108(prop);" not in patch:
         errors.append("dynamic fingerprint property access is missing domAssertRegisteredName108(prop)")
 
+    # Temporal initialization gate. Function declarations are hoisted in
+    # ExtendScript, while registry assignments/domRegister calls are not.
+    # The inherited base bootstrap must therefore be removed before eval and
+    # reinserted after contract + v1.0.8 patch initialization.
+    remove_pos = loader.find("code = code.replace(bootstrapNeedle,bootstrapReplacement);")
+    append_pos = loader.find('code += "\\n" + patch106 + "\\n" + contract108 + "\\n" + patch108Pieces.join("\\n");')
+    boot_pos = loader.find("__STYLEFIX_BOOT_STAGE = 'buildUI'")
+    if "var bootstrapNeedle" not in loader:
+        errors.append("loader does not declare the legacy bootstrap block")
+    if remove_pos < 0:
+        errors.append("loader does not remove the inherited early bootstrap")
+    if append_pos < 0:
+        errors.append("loader does not append contract/patch initialization as expected")
+    if boot_pos < 0:
+        errors.append("loader does not reinsert the deferred buildUI bootstrap")
+    if remove_pos >= 0 and append_pos >= 0 and boot_pos >= 0 and not (remove_pos < append_pos < boot_pos):
+        errors.append("loader bootstrap order is unsafe: removal < contract append < deferred boot is not satisfied")
+
     if errors:
         print("StyleFix DOM contract static check: FAIL")
         for e in errors:
@@ -146,6 +163,7 @@ def main() -> int:
     print(f"Registered unique names: {len(names)}")
     print("Historical bad-name guard: PASS")
     print("Critical direct-access guard: PASS")
+    print("Deferred-bootstrap order guard: PASS")
     return 0
 
 

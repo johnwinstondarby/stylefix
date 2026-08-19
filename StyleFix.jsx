@@ -9,6 +9,8 @@ branch. It retains the validated v1.0.5 base modules and v1.0.6 harness patch,
 then layers a declared DOM contract and the v1.0.8 scanner patch.
 
 The loader reads and validates every installed source component before eval.
+The legacy base bootstrap is removed before assembly and reinserted only after
+the DOM contract and v1.0.8 patch initialization have executed.
 Delete the installed src folder before copying a different release.
 */
 
@@ -50,6 +52,8 @@ Delete the installed src folder before copying a different release.
     var patch108Pieces = [];
     var pieces = [], checks = [], failures = [];
     var i, j, text, closeAt, patch106, contract108, patch108, code, marker;
+    var bootstrapNeedle = "    buildUI();\n    scan();\n    ui.win.show();";
+    var bootstrapReplacement = "    /* StyleFix bootstrap deferred by v1.0.8 loader. */";
 
     function readUtf8(path) {
         var file = new File(base.fsName + "/" + path), value;
@@ -111,10 +115,23 @@ Delete the installed src folder before copying a different release.
     pieces[pieces.length - 1] = pieces[pieces.length - 1].substring(0,closeAt);
 
     code = pieces.join("\n");
+    if (code.indexOf(bootstrapNeedle) < 0) {
+        alert("StyleFix v" + VERSION + "\n\nInstalled artifact parity failed: legacy bootstrap block was not found for deferred initialization.");
+        return;
+    }
+    code = code.replace(bootstrapNeedle,bootstrapReplacement);
     code = code.replace('StyleFix v1.0.5','StyleFix v1.0.8');
     code = code.replace('var VERSION = "1.0.5";','var VERSION = "1.0.8";');
     code = code.replace('var RELEASE_TAG = "v1.0.5";','var RELEASE_TAG = "v1.0.8-dev";');
-    code += "\n" + patch106 + "\n" + contract108 + "\n" + patch108Pieces.join("\n") + "\n}());\n";
+
+    /* Contract registration and patch initialization must execute before the
+       first UI/scan call. Function hoisting alone is insufficient because the
+       registry object assignments and domRegister108() calls are executable. */
+    code += "\n" + patch106 + "\n" + contract108 + "\n" + patch108Pieces.join("\n");
+    code += "\n$.global.__STYLEFIX_BOOT_STAGE = 'buildUI';\nbuildUI();";
+    code += "\n$.global.__STYLEFIX_BOOT_STAGE = 'scan';\nscan();";
+    code += "\n$.global.__STYLEFIX_BOOT_STAGE = 'show';\nui.win.show();";
+    code += "\n$.global.__STYLEFIX_BOOT_STAGE = 'complete';\n}());\n";
 
     $.global.__STYLEFIX_LOADER_RUNTIME = {
         loaderVersion:VERSION,
@@ -126,6 +143,7 @@ Delete the installed src folder before copying a different release.
         moduleChecks:checks.join(" | "),
         installedFile:String(File($.fileName).fsName)
     };
+    $.global.__STYLEFIX_BOOT_STAGE = "assembly";
 
     try {
         eval(code);
@@ -133,6 +151,8 @@ Delete the installed src folder before copying a different release.
         var msg = "StyleFix v" + VERSION + " failed to load.\n\n";
         try { msg += e.message; } catch (ignore1) { msg += String(e); }
         try { msg += "\nLine: " + e.line; } catch (ignore2) {}
+        try { msg += "\nStage: " + String($.global.__STYLEFIX_BOOT_STAGE); } catch (ignore3) {}
+        try { if ($.stack) { msg += "\nStack: " + String($.stack); } } catch (ignore4) {}
         alert(msg);
     }
 }());
