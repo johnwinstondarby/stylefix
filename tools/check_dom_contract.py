@@ -217,10 +217,15 @@ def main() -> int:
     }
     patch_joined = "\n".join(patch_raw[path] for path in patch_files)
 
-    # Patch12 adds DOC_COLORS dynamically. Account for that declared code/name.
-    if 'domRegister108("DOC_COLORS","colors"' in patch_joined:
-        codes.add("DOC_COLORS")
-        names.add("colors")
+    # Patch parts may extend the registry during initialization before the
+    # deferred bootstrap runs. Count every literal domRegister108 declaration,
+    # rather than maintaining checker-only exceptions for individual codes.
+    # The runtime registry remains the source of truth and duplicate codes are
+    # harmless here because this guard only needs declaration visibility.
+    patch_regs = REG_RE.findall(patch_joined)
+    for code_name, dom_name in patch_regs:
+        codes.add(code_name)
+        names.add(dom_name)
 
     for path, raw in patch_raw.items():
         for match in HELPER_RE.finditer(raw):
