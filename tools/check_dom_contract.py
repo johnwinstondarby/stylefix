@@ -4,8 +4,11 @@
 Checks that:
 - every literal property passed to legacy accessor helpers is registered;
 - every v1.0.8 domGet/domCall contract code is declared;
-- historically wrong names do not reappear;
+- historically wrong names do not reappear at live call sites;
 - safety-critical DOM names are not accessed directly in the v1.0.8 patch;
+- the accepted five-state contract correction is present;
+- the running-header character-style contract resolves to appliedCharacterStyle;
+- patch12 is installed and loaded after the earlier v1.0.8 patch parts;
 - the legacy base bootstrap is removed and restarted only after contract/patch
   initialization has been appended to the assembled program.
 
@@ -100,6 +103,11 @@ def main() -> int:
     if len(regs) < 70:
         errors.append(f"contract registry unexpectedly small: {len(regs)} entries")
 
+    # Patch12 adds only DOC_COLORS dynamically; account for that declared code.
+    if 'domRegister108("DOC_COLORS","colors"' in patch:
+        codes.add("DOC_COLORS")
+        names.add("colors")
+
     for match in HELPER_RE.finditer(patch):
         name = match.group(1)
         if name not in names:
@@ -134,10 +142,28 @@ def main() -> int:
     if "domAssertRegisteredName108(prop);" not in patch:
         errors.append("dynamic fingerprint property access is missing domAssertRegisteredName108(prop)")
 
+    patch12 = PATCH_DIR / "StyleFix.patch12.jsxinc"
+    if not patch12.exists():
+        errors.append("accepted-contract patch12 is missing")
+    else:
+        p12 = patch12.read_text(encoding="utf-8")
+        if "STYLEFIX_PATCH_PART: 1.0.8/12" not in p12:
+            errors.append("patch12 marker is missing or wrong")
+        if 'entry = DOM108["VARIABLE_APPLIED_STYLE"]' not in p12 or 'entry.name = "appliedCharacterStyle"' not in p12:
+            errors.append("running-header VARIABLE_APPLIED_STYLE is not corrected to appliedCharacterStyle")
+        for state in ["NOT_APPLICABLE", "NO_APPLICABLE_INSTANCE", "NOT_EXPOSED", "FAILED"]:
+            if state not in p12:
+                errors.append(f"accepted five-state taxonomy missing {state} from patch12")
+        if "findApplicableBasedOnRepresentative108" not in p12:
+            errors.append("patch12 does not select an applicable basedOn representative")
+        if "findRunningHeaderRepresentative108" not in p12:
+            errors.append("patch12 does not select an applicable running-header representative")
+
+    if '"src/v1.0.8/StyleFix.patch12.jsxinc"' not in loader:
+        errors.append("loader does not include StyleFix.patch12.jsxinc")
+
     # Temporal initialization gate. Function declarations are hoisted in
     # ExtendScript, while registry assignments/domRegister calls are not.
-    # The inherited base bootstrap must therefore be removed before eval and
-    # reinserted after contract + v1.0.8 patch initialization.
     remove_pos = loader.find("code = code.replace(bootstrapNeedle,bootstrapReplacement);")
     append_pos = loader.find('code += "\\n" + patch106 + "\\n" + contract108 + "\\n" + patch108Pieces.join("\\n");')
     boot_pos = loader.find("__STYLEFIX_BOOT_STAGE = 'buildUI'")
@@ -163,6 +189,8 @@ def main() -> int:
     print(f"Registered unique names: {len(names)}")
     print("Historical bad-name guard: PASS")
     print("Critical direct-access guard: PASS")
+    print("Accepted five-state contract guard: PASS")
+    print("Running-header property guard: PASS")
     print("Deferred-bootstrap order guard: PASS")
     return 0
 
