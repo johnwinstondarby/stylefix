@@ -48,9 +48,9 @@ When the only builder failure is L01 with `emptyShell=NO;exportMaps=0`, run `can
 
 ### D10 generated-index cleanup
 
-The D10 builder path generates an index so the page-reference override can be reacquired and verified after generation. In InDesign 21.5.1, removing the generated object can leave its page-number text behind as an overset Story. That contaminates D10 with one direct character-style use even though the acceptance contract requires D10 to remain dependency-only.
+The D10 builder path generates an index so the page-reference override can be reacquired and verified after generation. In InDesign 21.5.1, index generation can leave page-number text carrying the D10 character style even after the underlying generated object is removed. That contaminates D10 with one direct use although the acceptance contract requires D10 to remain dependency-only.
 
-If StyleFix reports `Unnamed Style D10` as `DIRECT + DEPENDENCY`, run `canary/coverage/RepairCoverage108_D10.jsx` against the generated supplemental INDD. The repair clears only the generated index-output Story after confirming it contains the D10 topic, verifies the underlying Index/Topic/PageReference dependency still points to `Unnamed Style D10`, saves the INDD, and re-exports the IDML. After the repair, rerun the supplemental IDML verifier and StyleFix scanner.
+Run `canary/coverage/RepairCoverage108_D10.jsx` when D10 has a direct run or when the INDD is already clean but the exported IDML still contains stale D10 direct-use evidence. The repair is idempotent: it neutralizes the single generated D10 text run when present, accepts an already-clean INDD when zero direct runs remain, verifies that `PageReference.pageNumberStyleOverride` still points to `Unnamed Style D10`, saves the INDD, and re-exports synchronized IDML evidence. After the repair, rerun the supplemental IDML verifier and StyleFix scanner.
 
 ### Supplemental IDML verification
 
@@ -80,4 +80,4 @@ The checker must report PASS. It verifies the v1.0.8 declaration/call-site contr
 
 ## Release interpretation
 
-A machine-generated PASS does not finish grading. The CSV remains the primary review artifact because prior silent defects have been found by reading output that no automated gate identified.
+The v1.0.8 suite is certified across core, supplemental, and degraded-evidence fixtures. A machine-generated PASS does not replace artifact review; the CSV remains the primary review instrument.
