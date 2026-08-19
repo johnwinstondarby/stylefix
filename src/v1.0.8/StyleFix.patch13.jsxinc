@@ -6,6 +6,8 @@ Stage-aware ScriptUI progress monitor.
 Instrumentation only:
 - does not alter audit, dependency, fingerprint, export-map, authorization, or
   classification logic;
+- uses a standalone modeless palette so progress is visible while the main
+  StyleFix results window is still hidden during the initial scan;
 - adds an overall native progressbar plus a stage-color accent and status text;
 - derives stage transitions from existing StyleFix status messages;
 - records elapsed time visually without adding cancellation or mutation paths.
@@ -27,7 +29,8 @@ var styleFixProgress108 = {
     percent:0,
     current:0,
     total:0,
-    color:"BLUE"
+    color:"BLUE",
+    mainVisibleAtStart:false
 };
 
 var styleFixBuildUIBeforeProgress108 = buildUI;
@@ -36,7 +39,8 @@ var styleFixScanBeforeProgress108 = scan;
 
 buildUI = function () {
     styleFixBuildUIBeforeProgress108();
-    styleFixAttachProgressUI108();
+    styleFixInstallMainShowHook108();
+    styleFixOpenProgressWindow108();
 };
 
 status = function (text) {
@@ -45,28 +49,69 @@ status = function (text) {
 };
 
 scan = function () {
+    styleFixProgress108.mainVisibleAtStart = styleFixMainWindowVisible108();
+    styleFixOpenProgressWindow108();
     styleFixProgressStart108();
     styleFixScanBeforeProgress108();
     if (styleFixProgress108.failed !== true && styleFixProgress108.running === true) {
         styleFixProgressComplete108();
     }
+
+    /* During the initial launch the main StyleFix window has not been shown
+       yet. Keep the completed progress palette visible until ui.win.onShow
+       fires, so the transition is Progress -> Results with no blank interval.
+       For a later Rescan the main window is already visible, so dismiss the
+       progress palette as soon as that scan finishes. */
+    if (styleFixProgress108.mainVisibleAtStart === true) {
+        styleFixCloseProgressWindow108();
+    }
 };
 
-function styleFixAttachProgressUI108() {
-    var header;
+function styleFixInstallMainShowHook108() {
+    var previousOnShow = null;
+    try { previousOnShow = ui.win.onShow; } catch (ignoreRead) {}
     try {
-        ui.progressPanel108 = ui.win.add("panel", undefined, "Progress");
-        ui.progressPanel108.orientation = "column";
-        ui.progressPanel108.alignChildren = ["fill","top"];
-        ui.progressPanel108.margins = [10,12,10,10];
-        ui.progressPanel108.spacing = 5;
+        ui.win.onShow = function () {
+            try {
+                if (previousOnShow && typeof previousOnShow === "function") {
+                    previousOnShow.call(this);
+                }
+            } catch (ignorePrevious) {}
+            styleFixCloseProgressWindow108();
+        };
+    } catch (ignoreHook) {}
+}
 
-        header = ui.progressPanel108.add("group");
+function styleFixMainWindowVisible108() {
+    try { return ui.win && ui.win.visible === true; } catch (ignoreVisible) {}
+    return false;
+}
+
+function styleFixOpenProgressWindow108() {
+    var win, header;
+
+    try {
+        if (ui.progressWin108 && ui.progressWin108.visible === true) {
+            return;
+        }
+    } catch (ignoreExisting) {}
+
+    try { styleFixCloseProgressWindow108(); } catch (ignoreClose) {}
+
+    try {
+        win = new Window("palette", "StyleFix v" + VERSION + " - Working");
+        win.orientation = "column";
+        win.alignChildren = ["fill","top"];
+        win.margins = 14;
+        win.spacing = 7;
+        ui.progressWin108 = win;
+
+        header = win.add("group");
         header.orientation = "row";
         header.alignChildren = ["left","center"];
 
         ui.progressStage108 = header.add("statictext", undefined, "Ready");
-        ui.progressStage108.preferredSize = [260,22];
+        ui.progressStage108.preferredSize = [250,22];
         try {
             ui.progressStage108.graphics.font = ScriptUI.newFont(
                 ui.progressStage108.graphics.font.name,"BOLD",11
@@ -74,30 +119,49 @@ function styleFixAttachProgressUI108() {
         } catch (ignoreFont) {}
 
         ui.progressCount108 = header.add("statictext", undefined, "");
-        ui.progressCount108.preferredSize = [190,22];
+        ui.progressCount108.preferredSize = [140,22];
 
         ui.progressElapsed108 = header.add("statictext", undefined, "Elapsed 0:00");
         ui.progressElapsed108.alignment = ["right","center"];
-        ui.progressElapsed108.preferredSize = [170,22];
+        ui.progressElapsed108.preferredSize = [150,22];
 
-        ui.progressAccent108 = ui.progressPanel108.add("panel", undefined, "");
-        ui.progressAccent108.preferredSize = [1240,6];
-        ui.progressAccent108.minimumSize = [300,6];
-        ui.progressAccent108.maximumSize = [5000,6];
+        ui.progressAccent108 = win.add("panel", undefined, "");
+        ui.progressAccent108.preferredSize = [600,6];
+        ui.progressAccent108.minimumSize = [360,6];
+        ui.progressAccent108.maximumSize = [1200,6];
 
-        ui.progressBar108 = ui.progressPanel108.add("progressbar", undefined, 0, 100);
-        ui.progressBar108.preferredSize = [1240,16];
-        ui.progressBar108.minimumSize = [300,16];
+        ui.progressBar108 = win.add("progressbar", undefined, 0, 100);
+        ui.progressBar108.preferredSize = [600,18];
+        ui.progressBar108.minimumSize = [360,18];
 
-        ui.progressOperation108 = ui.progressPanel108.add("statictext", undefined, "Ready.");
-        ui.progressOperation108.preferredSize = [1240,22];
+        ui.progressOperation108 = win.add("statictext", undefined, "Preparing StyleFix...", {multiline:true});
+        ui.progressOperation108.preferredSize = [600,38];
 
         styleFixSetProgressColor108("BLUE");
-        try { ui.win.layout.layout(true); } catch (ignoreLayout) {}
+        win.center();
+        win.show();
+        try { win.update(); } catch (ignoreUpdate) {}
     } catch (ignoreProgressUI) {
         /* Progress UI is advisory. A platform-specific ScriptUI limitation must
            never block the audit itself. */
     }
+}
+
+function styleFixCloseProgressWindow108() {
+    try {
+        if (ui.progressWin108) {
+            try { ui.progressWin108.hide(); } catch (ignoreHide) {}
+            try { ui.progressWin108.close(); } catch (ignoreClose) {}
+        }
+    } catch (ignoreWindow) {}
+
+    ui.progressWin108 = null;
+    ui.progressStage108 = null;
+    ui.progressCount108 = null;
+    ui.progressElapsed108 = null;
+    ui.progressAccent108 = null;
+    ui.progressBar108 = null;
+    ui.progressOperation108 = null;
 }
 
 function styleFixProgressStart108() {
@@ -213,7 +277,7 @@ function styleFixPaintProgress108(operation,force) {
     try { if (ui.progressOperation108) { ui.progressOperation108.text = String(operation || ""); } } catch (ignoreOp) {}
 
     styleFixSetProgressColor108(styleFixProgress108.color);
-    try { if (ui.win) { ui.win.update(); } } catch (ignoreUpdate) {}
+    try { if (ui.progressWin108) { ui.progressWin108.update(); } } catch (ignoreUpdate) {}
 }
 
 function styleFixSetProgressColor108(key) {
