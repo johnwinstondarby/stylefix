@@ -47,7 +47,8 @@ Delete the installed src folder before copying a different release.
         "src/v1.0.8/StyleFix.patch08.jsxinc",
         "src/v1.0.8/StyleFix.patch09.jsxinc",
         "src/v1.0.8/StyleFix.patch10.jsxinc",
-        "src/v1.0.8/StyleFix.patch11.jsxinc"
+        "src/v1.0.8/StyleFix.patch11.jsxinc",
+        "src/v1.0.8/StyleFix.patch12.jsxinc"
     ];
     var patch108Pieces = [];
     var pieces = [], checks = [], failures = [];
