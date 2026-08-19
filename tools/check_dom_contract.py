@@ -25,8 +25,14 @@ PATCH_DIR = ROOT / "src" / "v1.0.8"
 LOADER = ROOT / "StyleFix.jsx"
 
 REG_RE = re.compile(r'domRegister108\("([^"]+)","([^"]+)"')
-HELPER_RE = re.compile(r'\b(?:safePropertyObject|safeProperty|propertyReadable|readableValue)\s*\([^,]+,\s*"([^"]+)"')
-CODE_RE = re.compile(r'\b(?:domGet108|domTryGet108|domCall108|domTryMethod108)\s*\([^,]+,\s*"([^"]+)"')
+HELPER_RE = re.compile(
+    r'\b(?:safePropertyObject|safeProperty|propertyReadable|readableValue)'
+    r'\s*\([^,\n]+,\s*"([^"]+)"'
+)
+CODE_RE = re.compile(
+    r'\b(?:domGet108|domTryGet108|domCall108|domTryMethod108)'
+    r'\s*\([^,\n]+,\s*"([^"]+)"'
+)
 
 CRITICAL_DIRECT = {
     "indexGenerationOptions", "styleExportTagMaps", "appliedLanguage",
@@ -37,62 +43,156 @@ CRITICAL_DIRECT = {
     "textContainers",
 }
 
-# These are StyleFix-owned evidence/state objects, not InDesign DOM hosts. Their
-# field names deliberately mirror the DOM surfaces they summarize. The direct
-# access guard must not confuse evidence fields such as inv.endnoteTextFrames
-# with host-object access such as doc.endnoteTextFrames.
+# StyleFix-owned evidence/state objects. Their fields can intentionally mirror
+# DOM names without being direct DOM access.
 INTERNAL_RECEIVERS = {
     "inv", "inventory", "counts", "row", "usage", "scanMeta", "result", "audit",
     "capAudit", "contractAudit", "depAudit", "semanticAudit", "bookAudit", "state",
 }
 
-FORBIDDEN = [
-    (re.compile(r'\bindexOptions\b'), "historical wrong Document.indexOptions name"),
-    (re.compile(r'"language"'), "historical wrong fingerprint property language"),
-    (re.compile(r'\.endnotes\b'), "generic container.endnotes traversal"),
-    (re.compile(r'parentStory\s*\.\s*applyCharacterStyle'), "applyCharacterStyle on Story"),
+# Historical bad members that must never appear as executable member access.
+FORBIDDEN_CODE = [
+    (re.compile(r'(?<![A-Za-z0-9_$])(?:[A-Za-z_$][A-Za-z0-9_$]*|\])\.indexOptions\b'),
+     "historical wrong Document.indexOptions name"),
+    (re.compile(r'(?<![A-Za-z0-9_$])(?:[A-Za-z_$][A-Za-z0-9_$]*|\])\.endnotes\b'),
+     "generic container.endnotes traversal"),
+    (re.compile(r'\bparentStory\s*\.\s*applyCharacterStyle\b'),
+     "applyCharacterStyle on Story"),
+]
+
+# Historical wrong literal-property use. Diagnostic prose containing the word
+# language is harmless; only accessor/property declarations are checked.
+FORBIDDEN_LITERAL = [
+    (re.compile(
+        r'\b(?:safePropertyObject|safeProperty|propertyReadable|readableValue)'
+        r'\s*\([^,\n]+,\s*"language"'
+     ), 'historical wrong fingerprint property literal "language"'),
 ]
 
 
-def strip_strings_comments(src: str) -> str:
-    out = []
-    i = 0
-    state = "code"
-    quote = ""
-    while i < len(src):
-        ch = src[i]
-        nxt = src[i + 1] if i + 1 < len(src) else ""
-        if state == "code":
+def mask_js_code(src: str) -> str:
+    """Mask JS strings/comments while preserving line and column positions.
+
+    Quoted-string state resets at each physical source line. ExtendScript/ES3
+    source strings cannot contain an unescaped physical newline. This keeps
+    punctuation in a JavaScript regex literal on one line from corrupting the
+    lexical state of later lines. Block comments remain stateful across lines.
+    """
+    out: list[str] = []
+    in_block = False
+
+    for line in src.splitlines(keepends=True):
+        chars = list(line)
+        i = 0
+        quote: str | None = None
+
+        while i < len(chars):
+            ch = chars[i]
+            nxt = chars[i + 1] if i + 1 < len(chars) else ""
+
+            if in_block:
+                if ch == "*" and nxt == "/":
+                    chars[i] = " "
+                    chars[i + 1] = " "
+                    in_block = False
+                    i += 2
+                else:
+                    if ch not in "\r\n":
+                        chars[i] = " "
+                    i += 1
+                continue
+
+            if quote is not None:
+                if ch == "\\":
+                    if ch not in "\r\n":
+                        chars[i] = " "
+                    if i + 1 < len(chars):
+                        if chars[i + 1] not in "\r\n":
+                            chars[i + 1] = " "
+                        i += 2
+                    else:
+                        i += 1
+                    continue
+                if ch == quote:
+                    chars[i] = " "
+                    quote = None
+                    i += 1
+                    continue
+                if ch not in "\r\n":
+                    chars[i] = " "
+                i += 1
+                continue
+
             if ch == "/" and nxt == "/":
-                state = "line_comment"; out.extend("  "); i += 2; continue
+                for j in range(i, len(chars)):
+                    if chars[j] not in "\r\n":
+                        chars[j] = " "
+                break
+
             if ch == "/" and nxt == "*":
-                state = "block_comment"; out.extend("  "); i += 2; continue
-            if ch in "'\"":
-                state = "string"; quote = ch; out.append(" "); i += 1; continue
-            out.append(ch); i += 1; continue
-        if state == "line_comment":
-            if ch == "\n": state = "code"; out.append("\n")
-            else: out.append(" ")
-            i += 1; continue
-        if state == "block_comment":
-            if ch == "*" and nxt == "/":
-                state = "code"; out.extend("  "); i += 2
-            else:
-                out.append("\n" if ch == "\n" else " "); i += 1
-            continue
-        if state == "string":
-            if ch == "\\":
-                out.append(" ")
-                if i + 1 < len(src): out.append("\n" if src[i+1] == "\n" else " ")
-                i += 2; continue
-            if ch == quote:
-                state = "code"; out.append(" "); i += 1; continue
-            out.append("\n" if ch == "\n" else " "); i += 1
+                chars[i] = " "
+                chars[i + 1] = " "
+                in_block = True
+                i += 2
+                continue
+
+            if ch in ("'", '"'):
+                chars[i] = " "
+                quote = ch
+                i += 1
+                continue
+
+            i += 1
+
+        out.append("".join(chars))
+
     return "".join(out)
 
 
 def line_of(src: str, pos: int) -> int:
     return src.count("\n", 0, pos) + 1
+
+
+def source_line(src: str, line_no: int) -> str:
+    lines = src.splitlines()
+    if 1 <= line_no <= len(lines):
+        return lines[line_no - 1].strip()
+    return ""
+
+
+def scan_live_code(filename: str, raw: str, errors: list[str]) -> None:
+    code = mask_js_code(raw)
+
+    for pat, label in FORBIDDEN_CODE:
+        for match in pat.finditer(code):
+            ln = line_of(code, match.start())
+            errors.append(
+                f"{filename}:{ln}: forbidden {label} | {source_line(raw, ln)}"
+            )
+
+    for pat, label in FORBIDDEN_LITERAL:
+        for match in pat.finditer(raw):
+            ln = line_of(raw, match.start())
+            errors.append(
+                f"{filename}:{ln}: forbidden {label} | {source_line(raw, ln)}"
+            )
+
+    for name in sorted(CRITICAL_DIRECT):
+        pat = re.compile(
+            r'(?<![A-Za-z0-9_$])'
+            r'(?P<recv>[A-Za-z_$][A-Za-z0-9_$]*|\])\.'
+            + re.escape(name) + r'\b'
+        )
+        for match in pat.finditer(code):
+            recv = match.group("recv")
+            if recv in INTERNAL_RECEIVERS:
+                continue
+            ln = line_of(code, match.start())
+            errors.append(
+                f"{filename}:{ln}: direct DOM access .{name} "
+                f"on receiver {recv!r}; use contract accessor | "
+                f"{source_line(raw, ln)}"
+            )
 
 
 def main() -> int:
@@ -102,7 +202,7 @@ def main() -> int:
         print("StyleFix DOM contract static check: FAIL")
         print(" - no v1.0.8 patch parts found")
         return 1
-    patch = "\n".join(p.read_text(encoding="utf-8") for p in patch_files)
+
     loader = LOADER.read_text(encoding="utf-8")
     regs = REG_RE.findall(contract)
     codes = {c for c, _ in regs}
@@ -112,44 +212,42 @@ def main() -> int:
     if len(regs) < 70:
         errors.append(f"contract registry unexpectedly small: {len(regs)} entries")
 
-    # Patch12 adds only DOC_COLORS dynamically; account for that declared code.
-    if 'domRegister108("DOC_COLORS","colors"' in patch:
+    patch_raw: dict[Path, str] = {
+        path: path.read_text(encoding="utf-8") for path in patch_files
+    }
+    patch_joined = "\n".join(patch_raw[path] for path in patch_files)
+
+    # Patch12 adds DOC_COLORS dynamically. Account for that declared code/name.
+    if 'domRegister108("DOC_COLORS","colors"' in patch_joined:
         codes.add("DOC_COLORS")
         names.add("colors")
 
-    for match in HELPER_RE.finditer(patch):
-        name = match.group(1)
-        if name not in names:
-            errors.append(f"patch:{line_of(patch, match.start())}: helper uses unregistered DOM name {name!r}")
+    for path, raw in patch_raw.items():
+        for match in HELPER_RE.finditer(raw):
+            name = match.group(1)
+            if name not in names:
+                errors.append(
+                    f"{path.name}:{line_of(raw, match.start())}: "
+                    f"helper uses unregistered DOM name {name!r}"
+                )
 
-    for match in CODE_RE.finditer(patch):
-        code = match.group(1)
-        if code not in codes:
-            errors.append(f"patch:{line_of(patch, match.start())}: accessor uses unregistered contract code {code!r}")
+        for match in CODE_RE.finditer(raw):
+            code_name = match.group(1)
+            if code_name not in codes:
+                errors.append(
+                    f"{path.name}:{line_of(raw, match.start())}: "
+                    f"accessor uses unregistered contract code {code_name!r}"
+                )
 
-    code_patch = strip_strings_comments(patch)
-    code_loader = strip_strings_comments(loader)
-    code_combined = code_patch + "\n" + code_loader
-    for pat, label in FORBIDDEN:
-        for match in pat.finditer(code_combined):
-            errors.append(f"code:{line_of(code_combined, match.start())}: forbidden {label}")
-
-    for name in sorted(CRITICAL_DIRECT):
-        pat = re.compile(r'(?P<recv>[A-Za-z_$][A-Za-z0-9_$]*|\])\.' + re.escape(name) + r'\b')
-        for match in pat.finditer(code_patch):
-            recv = match.group("recv")
-            if recv in INTERNAL_RECEIVERS:
-                continue
-            errors.append(
-                f"patch:{line_of(code_patch, match.start())}: direct DOM access .{name} "
-                f"on receiver {recv!r}; use contract accessor"
-            )
+        # Lex each patch independently. A lexical assumption in one patch part
+        # must never contaminate the next patch part.
+        scan_live_code(path.name, raw, errors)
 
     for name in ["indexGenerationOptions", "appliedLanguage", "styleExportTagMaps"]:
         if name not in names:
             errors.append(f"required corrected DOM name missing from registry: {name}")
 
-    if "domAssertRegisteredName108(prop);" not in patch:
+    if "domAssertRegisteredName108(prop);" not in patch_joined:
         errors.append("dynamic fingerprint property access is missing domAssertRegisteredName108(prop)")
 
     patch12 = PATCH_DIR / "StyleFix.patch12.jsxinc"
@@ -159,9 +257,17 @@ def main() -> int:
         p12 = patch12.read_text(encoding="utf-8")
         if "STYLEFIX_PATCH_PART: 1.0.8/12" not in p12:
             errors.append("patch12 marker is missing or wrong")
-        if 'entry = DOM108["VARIABLE_APPLIED_STYLE"]' not in p12 or 'entry.name = "appliedCharacterStyle"' not in p12:
-            errors.append("running-header VARIABLE_APPLIED_STYLE is not corrected to appliedCharacterStyle")
-        for state in ["NOT_APPLICABLE", "NO_APPLICABLE_INSTANCE", "NOT_EXPOSED", "FAILED"]:
+        if (
+            'entry = DOM108["VARIABLE_APPLIED_STYLE"]' not in p12
+            or 'entry.name = "appliedCharacterStyle"' not in p12
+        ):
+            errors.append(
+                "running-header VARIABLE_APPLIED_STYLE is not corrected "
+                "to appliedCharacterStyle"
+            )
+        for state in [
+            "NOT_APPLICABLE", "NO_APPLICABLE_INSTANCE", "NOT_EXPOSED", "FAILED"
+        ]:
             if state not in p12:
                 errors.append(f"accepted five-state taxonomy missing {state} from patch12")
         if "findApplicableBasedOnRepresentative108" not in p12:
@@ -174,10 +280,11 @@ def main() -> int:
 
     # Temporal initialization gate. Function declarations are hoisted in
     # ExtendScript, while registry assignments/domRegister calls are not.
-    # The inherited base bootstrap must therefore be removed before eval and
-    # reinserted after contract + v1.0.8 patch initialization.
     remove_pos = loader.find("code = code.replace(bootstrapNeedle,bootstrapReplacement);")
-    append_pos = loader.find('code += "\\n" + patch106 + "\\n" + contract108 + "\\n" + patch108Pieces.join("\\n");')
+    append_pos = loader.find(
+        'code += "\\n" + patch106 + "\\n" + contract108 + "\\n" + '
+        'patch108Pieces.join("\\n");'
+    )
     boot_pos = loader.find("__STYLEFIX_BOOT_STAGE = 'buildUI'")
     if "var bootstrapNeedle" not in loader:
         errors.append("loader does not declare the legacy bootstrap block")
@@ -187,13 +294,21 @@ def main() -> int:
         errors.append("loader does not append contract/patch initialization as expected")
     if boot_pos < 0:
         errors.append("loader does not reinsert the deferred buildUI bootstrap")
-    if remove_pos >= 0 and append_pos >= 0 and boot_pos >= 0 and not (remove_pos < append_pos < boot_pos):
-        errors.append("loader bootstrap order is unsafe: removal < contract append < deferred boot is not satisfied")
+    if (
+        remove_pos >= 0
+        and append_pos >= 0
+        and boot_pos >= 0
+        and not (remove_pos < append_pos < boot_pos)
+    ):
+        errors.append(
+            "loader bootstrap order is unsafe: removal < contract append < "
+            "deferred boot is not satisfied"
+        )
 
     if errors:
         print("StyleFix DOM contract static check: FAIL")
-        for e in errors:
-            print(" - " + e)
+        for error in errors:
+            print(" - " + error)
         return 1
 
     print("StyleFix DOM contract static check: PASS")
