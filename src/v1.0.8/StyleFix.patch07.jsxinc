@@ -1,12 +1,21 @@
 /* STYLEFIX_PATCH_PART: 1.0.8/07 */
 /* ---------- location resolution ---------- */
 
+(function locationContractInit108() {
+    if (DOM108["OWNER_PAGES"] === undefined) {
+        domRegister108("OWNER_PAGES","pages","property","Spread/MasterSpread","LOCATION",false);
+    }
+}());
+
 function pagesForText(text) {
     var result = {names:[],firstPageRef:null,firstPageSort:999999998,overset:false};
-    var directFrames = [], endpoint, story, containers = [], i, p, res;
+    var directFrames = [], endpoint, story = null, containers = [], i, p, res;
 
     endpoint = endpointFrameInfo108(text);
     result.overset = endpoint.overset;
+
+    p = domTryGet108(text,"TEXT_PARENT_STORY");
+    if (p.state === "SUPPORTED" && p.value) { story = p.value; }
 
     p = domTryGet108(text,"TEXT_PARENT_TEXT_FRAMES");
     if (p.state === "SUPPORTED") {
@@ -18,23 +27,19 @@ function pagesForText(text) {
     for (i = 0; i < endpoint.frames.length; i++) { addPageFromFrame108(result,endpoint.frames[i],0); }
 
     /*
-       Direct parentTextFrames is the most precise route for a local range. Some
-       valid InDesign objects return an empty/unlocatable parent-frame array,
-       however, notably grouped, locked, anchored, threaded, and table-contained
-       text in the canary fixture. Story.textContainers is Adobe's authoritative
-       array of the frames/text paths that contain a Story. Use it when direct
-       resolution produced no page, or when the range demonstrably spans more
-       than one frame so intermediate threaded pages are not lost.
+       A TextStyleRange that covers an entire threaded story can still expose
+       only the first frame through parentTextFrames and its endpoint insertion
+       points. When the range covers the whole Story, enumerate Story.textContainers
+       so every threaded page carrying that range is reported. The same fallback
+       remains available when direct location resolution found no page.
     */
-    if (result.names.length === 0 || directFrames.length > 1 || endpoint.frames.length > 1) {
-        p = domTryGet108(text,"TEXT_PARENT_STORY");
-        if (p.state === "SUPPORTED" && p.value) {
-            story = p.value;
-            p = domTryGet108(story,"STORY_TEXT_CONTAINERS");
-            if (p.state === "SUPPORTED") {
-                containers = collectionItems108(p.value,"Story.textContainers",null,false).items;
-                for (i = 0; i < containers.length; i++) { addPageFromFrame108(result,containers[i],0); }
-            }
+    if (story !== null &&
+        (result.names.length === 0 || directFrames.length > 1 || endpoint.frames.length > 1 ||
+         textCoversWholeStory108(text,story))) {
+        p = domTryGet108(story,"STORY_TEXT_CONTAINERS");
+        if (p.state === "SUPPORTED") {
+            containers = collectionItems108(p.value,"Story.textContainers",null,false).items;
+            for (i = 0; i < containers.length; i++) { addPageFromFrame108(result,containers[i],0); }
         }
     }
 
@@ -45,6 +50,26 @@ function pagesForText(text) {
         result.names.push(result.overset ? "Overset/No page" : "Pasteboard/No page");
     }
     return result;
+}
+
+function textCoversWholeStory108(text,story) {
+    var a, b, la, lb;
+    if (!text || !story) { return false; }
+    a = domTryGet108(text,"TEXT_CHARACTERS");
+    b = domTryGet108(story,"TEXT_CHARACTERS");
+    if (a.state !== "SUPPORTED" || b.state !== "SUPPORTED") { return false; }
+    la = collectionLength108(a.value);
+    lb = collectionLength108(b.value);
+    return la >= 0 && lb >= 0 && la === lb;
+}
+
+function collectionLength108(collection) {
+    var p;
+    if (collection === null || collection === undefined) { return -1; }
+    p = domTryGet108(collection,"COLLECTION_LENGTH");
+    if (p.state !== "SUPPORTED") { return -1; }
+    p = Number(p.value);
+    return isNaN(p) ? -1 : p;
 }
 
 function endpointFrameInfo108(text) {
@@ -102,8 +127,6 @@ function addPageFromFrame108(result,frame,depth) {
     var page, parent, type, p, frames, i;
     if (frame === null || frame === undefined || depth > 12) { return; }
 
-    /* PageItem.parentPage is the strongest direct location signal. The same
-       property is also exposed by Group and other page-item containers. */
     p = domTryGet108(frame,"FRAME_PARENT_PAGE");
     if (p.state === "SUPPORTED") {
         page = p.value;
@@ -119,9 +142,18 @@ function addPageFromFrame108(result,frame,depth) {
         return;
     }
 
-    /* Anchored TextFrames can be parented by a Character. Groups can parent
-       TextFrames as well. Follow the generic parent chain, but first ask the
-       parent whether it directly identifies a page. */
+    /*
+       InDesign can return parentPage=null for valid page-owned items after
+       anchoring, grouping, layer locking, and in some threaded/master-page
+       contexts. The final location probe proved that their owning Spread or
+       MasterSpread still exposes the correct page collection. Resolve that
+       evidence only when ownership is unambiguous: one owner page, or multiple
+       parent pages whose visible page name is identical.
+    */
+    if (type === "Spread" || type === "MasterSpread") {
+        if (addPagesFromOwner108(result,frame)) { return; }
+    }
+
     p = domTryGet108(frame,"OBJECT_PARENT");
     if (p.state === "SUPPORTED") { parent = p.value; }
     else { parent = null; }
@@ -142,8 +174,6 @@ function addPageFromFrame108(result,frame,depth) {
         }
     }
 
-    /* Character and other text objects expose parentTextFrames. This is the
-       host-page route for anchored inline objects. */
     p = domTryGet108(parent,"TEXT_PARENT_TEXT_FRAMES");
     if (p.state === "SUPPORTED") {
         frames = collectionItems108(p.value,"Anchored parentTextFrames",null,false).items;
@@ -154,11 +184,36 @@ function addPageFromFrame108(result,frame,depth) {
     addPageFromFrame108(result,parent,depth + 1);
 }
 
+function addPagesFromOwner108(result,owner) {
+    var p, pages, i, firstName = null, sameName = true, name;
+    if (!owner) { return false; }
+    p = domTryGet108(owner,"OWNER_PAGES");
+    if (p.state !== "SUPPORTED") { return false; }
+    pages = collectionItems108(p.value,"Spread/MasterSpread.pages",null,false).items;
+    if (pages.length === 0) { return false; }
+    if (pages.length === 1) {
+        addPageObject108(result,pages[0]);
+        return true;
+    }
+    for (i = 0; i < pages.length; i++) {
+        try { name = String(pages[i][domEntry108("PAGE_NAME").name]); }
+        catch (ignoreName) { return false; }
+        if (firstName === null) { firstName = name; }
+        else if (name !== firstName) { sameName = false; break; }
+    }
+    if (sameName && firstName !== null) {
+        addPageObject108(result,pages[0]);
+        return true;
+    }
+    return false;
+}
+
 function addPageObject108(result,page) {
     var name, sort;
     if (page === null || page === undefined || !valid(page)) { return; }
     try { name = String(page[domEntry108("PAGE_NAME").name]); } catch (ignoreName) { return; }
     if (!containsString(result.names,name)) { result.names.push(name); }
+    if (result.firstPageRef === null) { result.firstPageRef = page; }
     try {
         sort = Number(page[domEntry108("PAGE_DOCUMENT_OFFSET").name]);
         if (!isNaN(sort) && sort < result.firstPageSort) {
