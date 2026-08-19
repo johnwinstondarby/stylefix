@@ -28,14 +28,16 @@ Run `canary/coverage/BuildCoverage108.jsx`.
 
 It builds:
 
+- D08: running-header character-style dependency through a `MATCH_CHARACTER_STYLE_TYPE` text variable;
+- D09: `Document.indexGenerationOptions.pageNumberStyle` dependency;
+- D10: `PageReference.pageNumberStyleOverride` dependency on a real generated index topic/reference;
 - E01: no export map;
 - E02: explicit EPUB export map;
-- F05: used style differing from its canonical candidate only by fill color;
-- F06: used style differing from its canonical candidate only by applied font;
-- I01: `Document.indexGenerationOptions.pageNumberStyle` dependency;
-- I02: `PageReference.pageNumberStyleOverride` dependency.
+- F05 Match/Miss: fill-color fingerprint match and near-miss discrimination;
+- F06 Match/Miss: applied-font fingerprint match and near-miss discrimination;
+- L01: clean empty-shell LOW control.
 
-The builder records the actual font pair and color pair selected on that machine. Both pairs must produce distinct read-back values before the fixture is valid.
+The builder records the actual font pair and color pair selected on that machine. Both pairs must produce distinct read-back values before the fixture is valid. The clean supplemental fixture is expected to produce no MEDIUM results.
 
 Expected results: `canary/expected/CANARY_SUPPLEMENTAL_EXPECTED_v1.0.8.csv`.
 
