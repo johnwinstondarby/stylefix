@@ -1,0 +1,439 @@
+/* LOCALIS_CORE_MUTATE_VERSION: 0.1.0 */
+
+/*
+Portable Localis InDesign mutation transaction core.
+ExtendScript / ECMAScript 3 compatible.
+
+The core is intentionally tool-neutral. It owns transaction sequencing,
+undo grouping, journaling, rollback, rollback verification, and the hard-stop
+rule after a rollback failure. Tool-specific code owns eligibility checks,
+snapshots, mutations, verification, restoration, and target descriptions.
+
+Required handlers:
+    precheck(target,index,context)
+    snapshot(target,index,context)
+    mutate(target,snapshotState,index,context)
+    verify(target,snapshotState,index,context)
+    rollback(target,snapshotState,index,context)
+    verifyRollback(target,snapshotState,index,context)
+
+Decision handlers return true/false or {ok:Boolean, reason:String}.
+Snapshot returns {state:..., rollbackReady:Boolean, reason:String}.
+
+Safety invariants:
+- mutation never starts unless rollbackReady === true;
+- mutation exceptions are assumed capable of partial change and therefore
+  enter rollback;
+- failed post-mutation verification enters rollback;
+- rollback success is never assumed; verifyRollback must pass;
+- ROLLBACK_FAILED aborts the remaining batch and cannot be configured away;
+- internal rollback restores from the captured snapshot and never calls
+  app.undo();
+- successful grouped batches remain one user-visible InDesign Undo step.
+*/
+
+function LocalisCreateMutateCore(runtime) {
+    runtime = runtime || {};
+
+    var VERSION = "0.1.0";
+    var STATES = {
+        SKIPPED:"SKIPPED",
+        COMMITTED:"COMMITTED",
+        MUTATION_FAILED_ROLLED_BACK:"MUTATION_FAILED_ROLLED_BACK",
+        VERIFICATION_FAILED_ROLLED_BACK:"VERIFICATION_FAILED_ROLLED_BACK",
+        ROLLBACK_FAILED:"ROLLBACK_FAILED"
+    };
+
+    function transaction(label, targets, handlers, options) {
+        var targetList, tx, runBatchFn, appObj, language, undoMode;
+        options = options || {};
+        validateConfiguration(label,handlers);
+        targetList = toTargetArray(targets);
+        tx = newTransaction(label,targetList.length);
+
+        runBatchFn = function () {
+            runBatch(targetList,handlers,options,tx);
+        };
+
+        if (options.groupUndo === false) {
+            if (options.requireUndoGrouping !== false) {
+                throw new Error("Localis mutate core requires undo grouping unless requireUndoGrouping=false is explicitly supplied.");
+            }
+            tx.undoGrouped = false;
+            tx.undoLabel = "";
+            runBatchFn();
+        } else {
+            appObj = runtimeApp();
+            if (!appObj || typeof appObj.doScript !== "function") {
+                throw new Error("Localis mutate core cannot establish an InDesign doScript undo group.");
+            }
+            if (typeof ScriptLanguage === "undefined" || ScriptLanguage.JAVASCRIPT === undefined ||
+                typeof UndoModes === "undefined" || UndoModes.ENTIRE_SCRIPT === undefined) {
+                throw new Error("Localis mutate core cannot resolve ScriptLanguage.JAVASCRIPT or UndoModes.ENTIRE_SCRIPT.");
+            }
+            language = ScriptLanguage.JAVASCRIPT;
+            undoMode = UndoModes.ENTIRE_SCRIPT;
+            tx.undoGrouped = true;
+            tx.undoLabel = String(label);
+            try {
+                appObj.doScript(runBatchFn,language,undefined,undoMode,String(label));
+            } catch (eOuter) {
+                tx.aborted = true;
+                tx.fatalError = errorText(eOuter);
+                tx.abortReason = "Transaction wrapper failed. The operator should inspect the document and use the grouped Undo step if recovery is required.";
+            }
+        }
+
+        finalizeTransaction(tx);
+        return tx;
+    }
+
+    function runBatch(targets,handlers,options,tx) {
+        var i, target, journal, context, pre, snap, verify, rollbackOutcome;
+
+        for (i = 0; i < targets.length; i++) {
+            if (tx.aborted === true) { break; }
+
+            target = targets[i];
+            journal = newJournal(i,target,handlers);
+            context = {
+                transaction:tx,
+                journal:journal,
+                label:tx.label,
+                options:options
+            };
+
+            emit(options,"PRECHECK",tx,journal);
+            journal.stage = "PRECHECK";
+            try {
+                pre = normalizeDecision(handlers.precheck(target,i,context),"Precheck returned no affirmative decision.");
+            } catch (ePre) {
+                pre = {ok:false,reason:"Precheck threw: " + errorText(ePre)};
+                journal.error = errorText(ePre);
+            }
+            journal.precheckOk = pre.ok;
+            if (pre.ok !== true) {
+                journal.state = STATES.SKIPPED;
+                journal.reason = pre.reason || "Precheck declined the target.";
+                completeJournal(tx,journal);
+                emit(options,"SKIPPED",tx,journal);
+                continue;
+            }
+
+            emit(options,"SNAPSHOT",tx,journal);
+            journal.stage = "SNAPSHOT";
+            try {
+                snap = normalizeSnapshot(handlers.snapshot(target,i,context));
+            } catch (eSnap) {
+                snap = {valid:false,rollbackReady:false,state:null,reason:"Snapshot threw: " + errorText(eSnap)};
+                journal.error = errorText(eSnap);
+            }
+            journal.snapshotCaptured = snap.valid === true;
+            journal.rollbackReady = snap.rollbackReady === true;
+            if (snap.valid !== true || snap.rollbackReady !== true) {
+                journal.state = STATES.SKIPPED;
+                journal.reason = snap.reason || "Rollback readiness was not established.";
+                completeJournal(tx,journal);
+                emit(options,"SKIPPED",tx,journal);
+                continue;
+            }
+
+            journal.stage = "MUTATE";
+            journal.mutationAttempted = true;
+            emit(options,"MUTATE",tx,journal);
+            try {
+                handlers.mutate(target,snap.state,i,context);
+                journal.mutationReturned = true;
+            } catch (eMutate) {
+                journal.failureReason = "Mutation threw: " + errorText(eMutate);
+                journal.error = errorText(eMutate);
+                rollbackOutcome = attemptRollback(
+                    target,snap.state,i,context,handlers,options,tx,journal,
+                    STATES.MUTATION_FAILED_ROLLED_BACK
+                );
+                completeJournal(tx,journal);
+                if (rollbackOutcome === false) { break; }
+                continue;
+            }
+
+            journal.stage = "VERIFY";
+            emit(options,"VERIFY",tx,journal);
+            try {
+                verify = normalizeDecision(handlers.verify(target,snap.state,i,context),"Verification returned no affirmative decision.");
+            } catch (eVerify) {
+                verify = {ok:false,reason:"Verification threw: " + errorText(eVerify)};
+                journal.error = errorText(eVerify);
+            }
+            journal.verifyOk = verify.ok;
+
+            if (verify.ok === true) {
+                journal.state = STATES.COMMITTED;
+                journal.reason = verify.reason || "Mutation verified.";
+                tx.committed++;
+                completeJournal(tx,journal);
+                emit(options,"COMMITTED",tx,journal);
+                continue;
+            }
+
+            journal.failureReason = verify.reason || "Mutation verification failed.";
+            rollbackOutcome = attemptRollback(
+                target,snap.state,i,context,handlers,options,tx,journal,
+                STATES.VERIFICATION_FAILED_ROLLED_BACK
+            );
+            completeJournal(tx,journal);
+            if (rollbackOutcome === false) { break; }
+        }
+    }
+
+    function attemptRollback(target,snapshotState,index,context,handlers,options,tx,journal,successState) {
+        var rbVerify;
+        journal.stage = "ROLLBACK";
+        journal.rollbackAttempted = true;
+        emit(options,"ROLLBACK",tx,journal);
+
+        try {
+            handlers.rollback(target,snapshotState,index,context);
+            journal.rollbackReturned = true;
+        } catch (eRollback) {
+            markRollbackFailed(tx,journal,"Rollback threw: " + errorText(eRollback),eRollback);
+            emit(options,"ROLLBACK_FAILED",tx,journal);
+            return false;
+        }
+
+        journal.stage = "ROLLBACK_VERIFY";
+        emit(options,"ROLLBACK_VERIFY",tx,journal);
+        try {
+            rbVerify = normalizeDecision(
+                handlers.verifyRollback(target,snapshotState,index,context),
+                "Rollback verification returned no affirmative decision."
+            );
+        } catch (eRollbackVerify) {
+            rbVerify = {ok:false,reason:"Rollback verification threw: " + errorText(eRollbackVerify)};
+            journal.rollbackError = errorText(eRollbackVerify);
+        }
+
+        journal.rollbackVerifyOk = rbVerify.ok;
+        if (rbVerify.ok !== true) {
+            markRollbackFailed(tx,journal,rbVerify.reason || "Rollback verification failed.",null);
+            emit(options,"ROLLBACK_FAILED",tx,journal);
+            return false;
+        }
+
+        journal.state = successState;
+        journal.reason = rbVerify.reason || "Prior state restored and verified.";
+        tx.rolledBack++;
+        emit(options,"ROLLED_BACK",tx,journal);
+        return true;
+    }
+
+    function markRollbackFailed(tx,journal,reason,err) {
+        journal.state = STATES.ROLLBACK_FAILED;
+        journal.reason = reason || "Rollback failed.";
+        if (err) { journal.rollbackError = errorText(err); }
+        tx.rollbackFailures++;
+        tx.aborted = true;
+        tx.abortIndex = journal.index;
+        tx.abortReason = "Rollback could not be verified. Remaining mutations were aborted.";
+    }
+
+    function completeJournal(tx,journal) {
+        journal.completedAt = (new Date()).getTime();
+        journal.durationMs = journal.completedAt - journal.startedAt;
+        journal.stage = "DONE";
+        tx.results.push(journal);
+        tx.processed++;
+        if (journal.state === STATES.SKIPPED) { tx.skipped++; }
+    }
+
+    function newTransaction(label,requested) {
+        return {
+            coreVersion:VERSION,
+            label:String(label),
+            startedAt:(new Date()).getTime(),
+            completedAt:0,
+            durationMs:0,
+            requested:requested,
+            processed:0,
+            committed:0,
+            skipped:0,
+            rolledBack:0,
+            rollbackFailures:0,
+            observerErrors:0,
+            aborted:false,
+            abortIndex:-1,
+            abortReason:"",
+            fatalError:"",
+            undoGrouped:false,
+            undoLabel:"",
+            finalState:"RUNNING",
+            results:[]
+        };
+    }
+
+    function newJournal(index,target,handlers) {
+        return {
+            index:index,
+            target:describeTarget(target,index,handlers),
+            startedAt:(new Date()).getTime(),
+            completedAt:0,
+            durationMs:0,
+            stage:"NEW",
+            state:"",
+            reason:"",
+            failureReason:"",
+            error:"",
+            rollbackError:"",
+            precheckOk:false,
+            snapshotCaptured:false,
+            rollbackReady:false,
+            mutationAttempted:false,
+            mutationReturned:false,
+            verifyOk:false,
+            rollbackAttempted:false,
+            rollbackReturned:false,
+            rollbackVerifyOk:false
+        };
+    }
+
+    function finalizeTransaction(tx) {
+        tx.completedAt = (new Date()).getTime();
+        tx.durationMs = tx.completedAt - tx.startedAt;
+
+        if (tx.rollbackFailures > 0 || tx.fatalError !== "") {
+            tx.finalState = STATES.ROLLBACK_FAILED;
+        } else if (tx.committed > 0 && tx.rolledBack > 0) {
+            tx.finalState = "COMPLETED_WITH_ROLLBACKS";
+        } else if (tx.committed > 0) {
+            tx.finalState = STATES.COMMITTED;
+        } else if (tx.rolledBack > 0) {
+            tx.finalState = "ROLLED_BACK";
+        } else {
+            tx.finalState = "NO_CHANGES";
+        }
+    }
+
+    function validateConfiguration(label,handlers) {
+        var required = ["precheck","snapshot","mutate","verify","rollback","verifyRollback"];
+        var i;
+        if (label === null || label === undefined || String(label).length === 0) {
+            throw new Error("Localis mutate core requires a non-empty transaction label.");
+        }
+        if (!handlers) { throw new Error("Localis mutate core requires handlers."); }
+        for (i = 0; i < required.length; i++) {
+            if (typeof handlers[required[i]] !== "function") {
+                throw new Error("Localis mutate core requires handler: " + required[i]);
+            }
+        }
+    }
+
+    function normalizeDecision(value,missingReason) {
+        if (value === true) { return {ok:true,reason:""}; }
+        if (value === false) { return {ok:false,reason:""}; }
+        if (value && typeof value === "object" && value.ok === true) {
+            return {ok:true,reason:safeString(value.reason)};
+        }
+        if (value && typeof value === "object" && value.ok === false) {
+            return {ok:false,reason:safeString(value.reason)};
+        }
+        return {ok:false,reason:String(missingReason || "No decision returned.")};
+    }
+
+    function normalizeSnapshot(value) {
+        if (!value || typeof value !== "object") {
+            return {valid:false,rollbackReady:false,state:null,reason:"Snapshot did not return an object."};
+        }
+        if (value.rollbackReady !== true) {
+            return {
+                valid:true,
+                rollbackReady:false,
+                state:value.state,
+                reason:safeString(value.reason) || "Snapshot did not establish rollback readiness."
+            };
+        }
+        return {
+            valid:true,
+            rollbackReady:true,
+            state:value.state,
+            reason:safeString(value.reason)
+        };
+    }
+
+    function describeTarget(target,index,handlers) {
+        var text, type, id, name;
+        if (typeof handlers.describeTarget === "function") {
+            try {
+                text = handlers.describeTarget(target,index);
+                if (text !== null && text !== undefined && String(text).length > 0) {
+                    return String(text);
+                }
+            } catch (ignoreDescribe) {}
+        }
+        type = "Object";
+        id = "";
+        name = "";
+        try { if (target.constructor && target.constructor.name) { type = String(target.constructor.name); } } catch (ignoreType) {}
+        try { if (target.id !== undefined) { id = String(target.id); } } catch (ignoreId) {}
+        try { if (target.name !== undefined) { name = String(target.name); } } catch (ignoreName) {}
+        text = type + " #" + index;
+        if (id !== "") { text += " ID=" + id; }
+        if (name !== "") { text += " " + name; }
+        return text;
+    }
+
+    function toTargetArray(targets) {
+        var out = [], i, len, value;
+        if (targets === null || targets === undefined) {
+            throw new Error("Localis mutate core requires a target collection.");
+        }
+        try { len = Number(targets.length); }
+        catch (eLen) { len = NaN; }
+        if (isNaN(len) || len < 0) {
+            throw new Error("Localis mutate core target collection has no readable length.");
+        }
+        for (i = 0; i < len; i++) {
+            value = undefined;
+            try { value = targets[i]; } catch (ignoreIndex) {}
+            if (value === undefined && typeof targets.item === "function") {
+                try { value = targets.item(i); } catch (ignoreItem) {}
+            }
+            out.push(value);
+        }
+        return out;
+    }
+
+    function emit(options,eventName,tx,journal) {
+        if (!options || typeof options.onEvent !== "function") { return; }
+        try { options.onEvent(eventName,tx,journal); }
+        catch (ignoreObserver) { tx.observerErrors++; }
+    }
+
+    function runtimeApp() {
+        if (runtime && runtime.app) { return runtime.app; }
+        try { if (typeof app !== "undefined") { return app; } } catch (ignoreApp) {}
+        return null;
+    }
+
+    function safeString(value) {
+        if (value === null || value === undefined) { return ""; }
+        try { return String(value); } catch (ignoreString) {}
+        return "";
+    }
+
+    function errorText(err) {
+        var parts = [];
+        if (err === null || err === undefined) { return "Unknown error"; }
+        try { if (err.message) { parts.push(String(err.message)); } } catch (ignoreMessage) {}
+        try { if (err.number !== undefined) { parts.push("Error " + String(err.number)); } } catch (ignoreNumber) {}
+        try { if (err.line !== undefined) { parts.push("line " + String(err.line)); } } catch (ignoreLine) {}
+        if (parts.length === 0) {
+            try { parts.push(String(err)); } catch (ignoreFallback) {}
+        }
+        return parts.join(" | ");
+    }
+
+    return {
+        version:VERSION,
+        states:STATES,
+        transaction:transaction
+    };
+}
