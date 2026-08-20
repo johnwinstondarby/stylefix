@@ -1,0 +1,11 @@
+Control,Expected Result,Safety Property
+T01,COMMITTED,Successful mutation requires read-back verification
+T02,SKIPPED,Failed precheck never enters mutation
+T03,MUTATION_FAILED_ROLLED_BACK,Mutation exception always enters verified rollback
+T04,MUTATION_FAILED_ROLLED_BACK,Partial mutation is restored from snapshot
+T05,VERIFICATION_FAILED_ROLLED_BACK,Failed post-state verification restores prior state
+T06,VERIFICATION_FAILED_ROLLED_BACK,Rollback restores every captured property and is verified
+T07,ROLLBACK_FAILED,Unverified restoration is a hard failure
+T08,ROLLBACK_FAILED and later target untouched,Rollback failure aborts remaining batch
+T09,One Undo restores both targets,ENTIRE_SCRIPT groups successful batch as one operator Undo
+T10,COMMITTED with complete journal,Transaction returns auditable per-target safety evidence
