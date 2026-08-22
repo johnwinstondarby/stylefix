@@ -96,4 +96,15 @@ See [DESIGN_NOTES.md](DESIGN_NOTES.md) for the evidence model, contract design, 
 
 StyleFix is being developed as a community utility rather than as a one-document cleanup script. Conservative refusal and compatibility reporting are part of the product surface.
 
-A formal open-source license has not yet been selected. Use StyleFix on backed-up documents and validate results independently. The software is provided without warranty.
+Use StyleFix on backed-up documents and validate results independently. The software is provided without warranty.
+
+## License
+
+Copyright (C) 2026 John Darby
+
+StyleFix is free software, released under the GNU General Public License,
+version 3 or later. You may redistribute and modify it under those terms.
+See [LICENSE](LICENSE) for the full text.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY. See the GNU General Public License for details.
